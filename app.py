@@ -3,29 +3,27 @@ import requests
 import threading
 import time
 import os
-import pickle
 import unicodedata
-import numpy as np
 from datetime import datetime
-
-from sklearn.ensemble import RandomForestClassifier
 
 app = Flask(__name__)
 app.config["JSON_AS_ASCII"] = False
 
 API = "https://phanmemdudoan.fun/apisun.php"
 
+history_file = "history.txt"
+
 last_period = None
 current_day = datetime.now().day
 
 
-# tạo history
-if not os.path.exists("history.txt"):
-    open("history.txt","w",encoding="utf-8").close()
+# tạo history nếu chưa có
+if not os.path.exists(history_file):
+    open(history_file,"w",encoding="utf-8").close()
 
 
-# chuẩn hóa chữ tài xỉu
-def normalize_result(text):
+# sửa lỗi chữ tài xỉu
+def normalize(text):
 
     text=str(text)
     text=unicodedata.normalize("NFC",text)
@@ -40,51 +38,82 @@ def normalize_result(text):
     return text
 
 
-# reset mỗi ngày
-def reset_daily():
-
-    global current_day
-
-    while True:
-
-        if datetime.now().day != current_day:
-
-            current_day = datetime.now().day
-
-            open("history.txt","w").close()
-
-            print("History reset for new day")
-
-        time.sleep(60)
-
-
-# đọc history newest → oldest
+# đọc history mới -> cũ
 def read_history():
 
-    history=[]
+    data=[]
 
-    with open("history.txt",encoding="utf-8") as f:
+    try:
 
-        lines=f.readlines()
+        with open(history_file,encoding="utf-8") as f:
 
-    lines.reverse()
+            lines=f.readlines()
 
-    for line in lines:
+        lines.reverse()
 
-        p=line.strip().split(",")
+        for line in lines:
 
-        if len(p)<3:
-            continue
+            p=line.strip().split(",")
 
-        r=normalize_result(p[1])
+            if len(p)<3:
+                continue
 
-        if r=="Tài":
-            history.append(1)
+            r=normalize(p[1])
 
-        elif r=="Xỉu":
-            history.append(0)
+            if r=="Tài":
+                data.append(1)
 
-    return history
+            elif r=="Xỉu":
+                data.append(0)
+
+    except:
+        pass
+
+    return data
+
+
+# AI phân tích
+def ai_analyze():
+
+    history = read_history()
+
+    if len(history)==0:
+
+        return {
+            "prediction":"Loading",
+            "confidence":0
+        }
+
+    tai = history.count(1)
+    xiu = history.count(0)
+
+    total = tai + xiu
+
+    if total == 0:
+        return {"prediction":"Loading","confidence":0}
+
+    tai_rate = tai/total
+    xiu_rate = xiu/total
+
+    if tai_rate > xiu_rate:
+
+        return {
+
+            "prediction":"Tài",
+            "confidence":round(tai_rate*100,2),
+            "rounds":total
+
+        }
+
+    else:
+
+        return {
+
+            "prediction":"Xỉu",
+            "confidence":round(xiu_rate*100,2),
+            "rounds":total
+
+        }
 
 
 # lấy API
@@ -101,9 +130,7 @@ def collector():
             data=r.json()
 
             period=data["period"]
-
-            result=normalize_result(data["result"])
-
+            result=normalize(data["result"])
             total=data["total"]
 
             if period!=last_period:
@@ -112,7 +139,7 @@ def collector():
 
                 line=f"{period},{result},{total}\n"
 
-                with open("history.txt","a",encoding="utf-8") as f:
+                with open(history_file,"a",encoding="utf-8") as f:
                     f.write(line)
 
                 print("Saved:",period,result)
@@ -121,100 +148,34 @@ def collector():
 
             print("API error:",e)
 
-        time.sleep(10)
+        time.sleep(5)
 
 
-# train AI
-def train_ai():
+# reset mỗi ngày
+def reset_daily():
+
+    global current_day
 
     while True:
 
-        try:
+        if datetime.now().day != current_day:
 
-            history = read_history()
+            current_day = datetime.now().day
 
-            if len(history) < 50:
+            open(history_file,"w").close()
 
-                time.sleep(60)
-                continue
+            print("History reset")
 
-            window = 20
-
-            X=[]
-            y=[]
-
-            for i in range(window,len(history)):
-
-                X.append(history[i-window:i])
-                y.append(history[i])
-
-            X=np.array(X)
-            y=np.array(y)
-
-            model = RandomForestClassifier(
-                n_estimators=300
-            )
-
-            model.fit(X,y)
-
-            pickle.dump((model,window),open("model.pkl","wb"))
-
-            print("AI trained:",len(history),"rounds")
-
-        except Exception as e:
-
-            print("Train error:",e)
-
-        time.sleep(120)
+        time.sleep(60)
 
 
-# dự đoán
-def predict():
-
-    try:
-
-        if not os.path.exists("model.pkl"):
-
-            return {"prediction":"Loading","confidence":0}
-
-        history=read_history()
-
-        model,window = pickle.load(open("model.pkl","rb"))
-
-        if len(history) < window:
-
-            return {"prediction":"Loading","confidence":0}
-
-        last = history[:window]
-
-        prob=model.predict_proba([last])[0]
-
-        if prob[1] > prob[0]:
-
-            return {
-                "prediction":"Tài",
-                "confidence":round(prob[1]*100,2)
-            }
-
-        else:
-
-            return {
-                "prediction":"Xỉu",
-                "confidence":round(prob[0]*100,2)
-            }
-
-    except:
-
-        return {"prediction":"Error","confidence":0}
-
-
-# WEB
+# web
 @app.route("/")
 def home():
 
     return """
 
-<h1>AI Tai Xiu Predictor</h1>
+<h1>AI Tai Xiu Analyzer</h1>
 
 <div id="result">Loading...</div>
 
@@ -223,17 +184,17 @@ def home():
 async function load(){
 
 let r=await fetch("/api/predict")
-
 let d=await r.json()
 
 document.getElementById("result").innerHTML=
 
-"<h2>"+d.prediction+"</h2><p>"+d.confidence+"%</p>"
+"<h2>"+d.prediction+"</h2>"+
+"<p>Confidence: "+d.confidence+"%</p>"+
+"<p>Rounds analyzed: "+d.rounds+"</p>"
 
 }
 
 setInterval(load,5000)
-
 load()
 
 </script>
@@ -241,14 +202,14 @@ load()
 """
 
 
-# API predict
+# api predict
 @app.route("/api/predict")
 def api_predict():
 
-    return jsonify(predict())
+    return jsonify(ai_analyze())
 
 
-# API history
+# api history
 @app.route("/api/history")
 def api_history():
 
@@ -256,9 +217,9 @@ def api_history():
 
     try:
 
-        with open("history.txt",encoding="utf-8") as f:
+        with open(history_file,encoding="utf-8") as f:
 
-            for line in f.readlines()[-100:]:
+            for line in f.readlines():
 
                 p=line.strip().split(",")
 
@@ -278,7 +239,6 @@ def api_history():
 
 # threads
 threading.Thread(target=collector,daemon=True).start()
-threading.Thread(target=train_ai,daemon=True).start()
 threading.Thread(target=reset_daily,daemon=True).start()
 
 
@@ -287,3 +247,4 @@ if __name__=="__main__":
     port=int(os.environ.get("PORT",10000))
 
     app.run(host="0.0.0.0",port=port)
+
