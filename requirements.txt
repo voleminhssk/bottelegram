@@ -2,5 +2,5 @@ flask
 requests
 numpy
 scikit-learn
-tensorflow==2.13.0
+tensorflow==3.7.0
 python-telegram-bot==13.15
