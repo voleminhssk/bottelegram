@@ -6,9 +6,14 @@ import os
 import unicodedata
 import numpy as np
 
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.ensemble import ExtraTreesClassifier
+
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
 from catboost import CatBoostClassifier
+
 
 app = Flask(__name__)
 
@@ -16,15 +21,18 @@ API="https://phanmemdudoan.fun/apisun.php"
 
 history_file="history.txt"
 
-window=10
+window=12
 max_history=1000
 
 last_period=None
 
+latest_period=None
 latest_result=None
-latest_prediction=None
-latest_confidence=None
-status_message="Đang chờ dữ liệu..."
+latest_total=None
+
+prediction=None
+confidence=None
+status="Đang chờ dữ liệu..."
 
 
 if not os.path.exists(history_file):
@@ -50,7 +58,6 @@ def read_history():
     data=[]
 
     with open(history_file,encoding="utf-8") as f:
-
         lines=f.readlines()
 
     lines.reverse()
@@ -85,11 +92,9 @@ def save_history(period,result,total):
     lines.append(f"{period},{result},{total}\n")
 
     if len(lines)>max_history:
-
         lines=lines[-max_history:]
 
     with open(history_file,"w",encoding="utf-8") as f:
-
         f.writelines(lines)
 
 
@@ -108,83 +113,77 @@ def build_dataset(history):
 
 def ai_predict():
 
-    global status_message
+    global prediction,confidence,status
 
     history=read_history()
 
     if len(history)<10:
 
-        status_message=f"Chưa đủ dữ liệu AI ({len(history)}/10)"
+        status=f"Cần ít nhất 10 phiên để AI phân tích ({len(history)}/10)"
+        prediction=None
+        confidence=None
+        return
 
-        return None
-
-    status_message="AI đang phân tích..."
+    status="AI đang phân tích..."
 
     X,y=build_dataset(history)
 
     last=np.array(history[:window]).reshape(1,-1)
 
-    # XGBoost
+    models=[]
 
-    xgb=XGBClassifier(
-        n_estimators=200,
-        max_depth=5,
-        learning_rate=0.1
-    )
+    models.append(XGBClassifier(n_estimators=150))
+    models.append(LGBMClassifier(n_estimators=150))
+    models.append(CatBoostClassifier(iterations=150,verbose=0))
+    models.append(RandomForestClassifier(n_estimators=200))
+    models.append(GradientBoostingClassifier())
+    models.append(ExtraTreesClassifier(n_estimators=200))
 
-    xgb.fit(X,y)
+    probs=[]
 
-    p1=xgb.predict_proba(last)[0][1]
+    for m in models:
 
+        try:
 
-    # LightGBM
+            m.fit(X,y)
 
-    lgb=LGBMClassifier(
-        n_estimators=200
-    )
+            p=m.predict_proba(last)[0][1]
 
-    lgb.fit(X,y)
+            probs.append(p)
 
-    p2=lgb.predict_proba(last)[0][1]
-
-
-    # CatBoost
-
-    cat=CatBoostClassifier(
-        iterations=200,
-        verbose=0
-    )
-
-    cat.fit(X,y)
-
-    p3=cat.predict_proba(last)[0][1]
+        except:
+            continue
 
 
-    prob=(p1+p2+p3)/3
+    if len(probs)==0:
 
+        status="AI training error"
+        prediction=None
+        confidence=None
+        return
+
+
+    prob=sum(probs)/len(probs)
 
     if prob>0.5:
 
-        pred="Tài"
-        conf=prob*100
+        prediction="Tài"
+        confidence=round(prob*100,2)
 
     else:
 
-        pred="Xỉu"
-        conf=(1-prob)*100
+        prediction="Xỉu"
+        confidence=round((1-prob)*100,2)
 
-
-    status_message="AI đã phân tích xong"
-
-    return pred,round(conf,2)
+    status="AI Ensemble 6 Model đã phân tích"
 
 
 def collector():
 
     global last_period
+    global latest_period
     global latest_result
-    global latest_prediction
-    global latest_confidence
+    global latest_total
 
     while True:
 
@@ -202,24 +201,19 @@ def collector():
 
                 last_period=period
 
+                latest_period=period
+                latest_result=result
+                latest_total=total
+
                 save_history(period,result,total)
 
-                latest_result=result
+                ai_predict()
 
-                ai=ai_predict()
-
-                if ai:
-
-                    p,c=ai
-
-                    latest_prediction=p
-                    latest_confidence=c
-
-                print("Round:",period,result)
+                print("Round:",period,result,total)
 
         except Exception as e:
 
-            print(e)
+            print("API error:",e)
 
         time.sleep(15)
 
@@ -242,20 +236,21 @@ background:#111;
 color:white;
 font-family:Arial;
 text-align:center;
-margin-top:100px;
+margin-top:80px;
 }
 
 .box{
 background:#222;
 padding:30px;
 border-radius:10px;
-width:350px;
+width:360px;
 margin:auto;
 }
 
 .result{
 font-size:40px;
 margin:20px;
+color:#00ffcc;
 }
 
 </style>
@@ -283,7 +278,11 @@ document.getElementById("data").innerHTML=
 
 "<div class='result'>"+(d.prediction||"-")+"</div>"+
 
-"<p>Kết quả trước: "+(d.result||"-")+"</p>"+
+"<p>Phiên trước: "+(d.period||"-")+"</p>"+
+
+"<p>Kết quả: "+(d.result||"-")+"</p>"+
+
+"<p>Tổng xúc xắc: "+(d.total||"-")+" 🎲</p>"+
 
 "<p>Confidence: "+(d.confidence||"-")+"%</p>"+
 
@@ -292,6 +291,7 @@ document.getElementById("data").innerHTML=
 }
 
 setInterval(load,5000)
+
 load()
 
 </script>
@@ -308,10 +308,12 @@ def api():
 
     return jsonify({
 
+        "period":latest_period,
         "result":latest_result,
-        "prediction":latest_prediction,
-        "confidence":latest_confidence,
-        "status":status_message
+        "total":latest_total,
+        "prediction":prediction,
+        "confidence":confidence,
+        "status":status
 
     })
 
