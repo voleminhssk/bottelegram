@@ -1,19 +1,21 @@
 import os
 import time
+import threading
 import requests
 import numpy as np
 import unicodedata
 
 from datetime import datetime
+from flask import Flask
 
 from telegram import Bot
 
-import tensorflow as tf
-from tensorflow.keras.layers import *
-from tensorflow.keras.models import Model, load_model
-
 from sklearn.ensemble import RandomForestClassifier
 
+
+# ==============================
+# TELEGRAM
+# ==============================
 
 TOKEN="7789180148:AAHzAdGMxWS3IWXkk-VoVpP8zoAsGkITALQ"
 CHAT_ID="-1002260844789"
@@ -21,22 +23,27 @@ CHAT_ID="-1002260844789"
 bot=Bot(token=TOKEN)
 
 
+# ==============================
+# CONFIG
+# ==============================
+
 API="https://phanmemdudoan.fun/apisun.php"
 
 history_file="history.txt"
 
 window=12
 max_history=500
-train_interval=20
 
 last_period=None
-round_count=0
 current_day=datetime.now().day
 
 
-if not os.path.exists(history_file):
-    open(history_file,"w").close()
+app = Flask(__name__)
 
+
+# ==============================
+# NORMALIZE
+# ==============================
 
 def normalize(text):
 
@@ -52,33 +59,46 @@ def normalize(text):
     return text
 
 
+# ==============================
+# READ HISTORY
+# ==============================
+
 def read_history():
 
     data=[]
 
-    with open(history_file,encoding="utf-8") as f:
+    try:
 
-        lines=f.readlines()
+        with open(history_file,encoding="utf-8") as f:
 
-    lines.reverse()
+            lines=f.readlines()
 
-    for line in lines:
+        lines.reverse()
 
-        p=line.strip().split(",")
+        for line in lines:
 
-        if len(p)<3:
-            continue
+            p=line.strip().split(",")
 
-        r=normalize(p[1])
+            if len(p)<3:
+                continue
 
-        if r=="Tài":
-            data.append(1)
+            r=normalize(p[1])
 
-        elif r=="Xỉu":
-            data.append(0)
+            if r=="Tài":
+                data.append(1)
+
+            elif r=="Xỉu":
+                data.append(0)
+
+    except:
+        pass
 
     return data[:max_history]
 
+
+# ==============================
+# DATASET
+# ==============================
 
 def build_dataset(history):
 
@@ -93,79 +113,10 @@ def build_dataset(history):
     return np.array(X),np.array(y)
 
 
-# Transformer nhẹ
-def transformer_model():
+# ==============================
+# AI PREDICT
+# ==============================
 
-    inp=Input(shape=(window,1))
-
-    x=MultiHeadAttention(num_heads=2,key_dim=16)(inp,inp)
-
-    x=LayerNormalization()(x)
-
-    x=Dense(32,activation="relu")(x)
-
-    x=GlobalAveragePooling1D()(x)
-
-    out=Dense(1,activation="sigmoid")(x)
-
-    model=Model(inp,out)
-
-    model.compile(
-        optimizer="adam",
-        loss="binary_crossentropy"
-    )
-
-    return model
-
-
-# LSTM
-def lstm_model():
-
-    inp=Input(shape=(window,1))
-
-    x=LSTM(32)(inp)
-
-    out=Dense(1,activation="sigmoid")(x)
-
-    model=Model(inp,out)
-
-    model.compile(
-        optimizer="adam",
-        loss="binary_crossentropy"
-    )
-
-    return model
-
-
-# Train AI
-def train_models(history):
-
-    X,y=build_dataset(history)
-
-    X=X.reshape((X.shape[0],X.shape[1],1))
-
-    # transformer
-
-    if os.path.exists("transformer.h5"):
-        model=load_model("transformer.h5")
-    else:
-        model=transformer_model()
-
-    model.fit(X,y,epochs=2,verbose=0)
-    model.save("transformer.h5")
-
-    # lstm
-
-    if os.path.exists("lstm.h5"):
-        model=load_model("lstm.h5")
-    else:
-        model=lstm_model()
-
-    model.fit(X,y,epochs=2,verbose=0)
-    model.save("lstm.h5")
-
-
-# AI Predict
 def ai_predict():
 
     history=read_history()
@@ -173,54 +124,34 @@ def ai_predict():
     if len(history)<50:
         return None
 
-    last=np.array(history[:window]).reshape((1,window,1))
-
-    # transformer
-
-    tf_model=load_model("transformer.h5")
-
-    p1=tf_model.predict(last,verbose=0)[0][0]
-
-    # lstm
-
-    lstm=load_model("lstm.h5")
-
-    p2=lstm.predict(last,verbose=0)[0][0]
-
-    # random forest
-
     X,y=build_dataset(history)
 
-    rf=RandomForestClassifier(n_estimators=100)
-
-    rf.fit(X,y)
-
-    p3=rf.predict_proba(last.reshape(1,-1))[0][1]
-
-    # markov
-
-    markov={0:{0:1,1:1},1:{0:1,1:1}}
-
-    for i in range(len(history)-1):
-        markov[history[i]][history[i+1]]+=1
-
-    last_state=history[0]
-
-    p4=markov[last_state][1]/(
-        markov[last_state][0]+markov[last_state][1]
+    model=RandomForestClassifier(
+        n_estimators=200
     )
 
-    prob=(p1+p2+p3+p4)/4
+    model.fit(X,y)
+
+    last=np.array(history[:window]).reshape(1,-1)
+
+    prob=model.predict_proba(last)[0][1]
 
     if prob>0.5:
+
         pred="Tài"
         conf=prob*100
+
     else:
+
         pred="Xỉu"
         conf=(1-prob)*100
 
     return pred,round(conf,2)
 
+
+# ==============================
+# RESET DAILY
+# ==============================
 
 def reset_daily():
 
@@ -232,13 +163,19 @@ def reset_daily():
 
         open(history_file,"w").close()
 
-        bot.send_message(CHAT_ID,"History reset")
+        bot.send_message(
+            CHAT_ID,
+            "History reset"
+        )
 
+
+# ==============================
+# COLLECT DATA
+# ==============================
 
 def collector():
 
     global last_period
-    global round_count
 
     while True:
 
@@ -256,16 +193,9 @@ def collector():
 
                 last_period=period
 
-                round_count+=1
-
                 with open(history_file,"a",encoding="utf-8") as f:
+
                     f.write(f"{period},{result},{total}\n")
-
-                history=read_history()
-
-                if round_count % train_interval == 0:
-
-                    train_models(history)
 
                 ai=ai_predict()
 
@@ -278,7 +208,7 @@ def collector():
                         CHAT_ID,
 
                         f"Phiên {period}\n"
-                        f"KQ {result}\n\n"
+                        f"KQ: {result}\n\n"
                         f"AI dự đoán: {p}\n"
                         f"Confidence: {c}%"
 
@@ -286,13 +216,41 @@ def collector():
 
         except Exception as e:
 
-            print(e)
+            print("Error:",e)
 
         reset_daily()
 
         time.sleep(15)
 
 
-print("RENDER AI BOT RUNNING")
+# ==============================
+# WEB SERVER (GIỮ RENDER KHÔNG SLEEP)
+# ==============================
 
-collector()
+@app.route("/")
+def home():
+    return "AI BOT RUNNING 24/24"
+
+
+# ==============================
+# START THREAD
+# ==============================
+
+threading.Thread(
+    target=collector,
+    daemon=True
+).start()
+
+
+# ==============================
+# RUN SERVER
+# ==============================
+
+if __name__ == "__main__":
+
+    port=int(os.environ.get("PORT",10000))
+
+    app.run(
+        host="0.0.0.0",
+        port=port
+    )
