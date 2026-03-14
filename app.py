@@ -12,7 +12,7 @@ from tensorflow.keras.layers import LSTM, Dense
 app = Flask(__name__)
 app.config["JSON_AS_ASCII"] = False
 
-API = "https://phanmemdudoan.fun/apisun.php"
+API="https://phanmemdudoan.fun/apisun.php"
 
 history_file="history.txt"
 model_file="model.h5"
@@ -22,11 +22,12 @@ last_period=None
 model=None
 
 
+# tạo history nếu chưa có
 if not os.path.exists(history_file):
     open(history_file,"w",encoding="utf-8").close()
 
 
-# sửa lỗi unicode
+# chuẩn hóa chữ
 def normalize(text):
 
     text=str(text)
@@ -45,7 +46,7 @@ def normalize(text):
 # đọc history
 def read_history():
 
-    data=[]
+    history=[]
 
     with open(history_file,encoding="utf-8") as f:
         lines=f.readlines()
@@ -62,15 +63,15 @@ def read_history():
         r=normalize(p[1])
 
         if r=="Tài":
-            data.append(1)
+            history.append(1)
 
         elif r=="Xỉu":
-            data.append(0)
+            history.append(0)
 
-    return data
+    return history
 
 
-# tạo model LSTM
+# tạo model
 def build_model():
 
     m=Sequential()
@@ -95,7 +96,7 @@ def train_ai():
 
     history=read_history()
 
-    if len(history) < window+5:
+    if len(history) < window+1:
         return
 
     X=[]
@@ -118,14 +119,14 @@ def train_ai():
         else:
             model=build_model()
 
-    model.fit(X,y,epochs=5,verbose=0)
+    model.fit(X,y,epochs=3,verbose=0)
 
     model.save(model_file)
 
     print("AI trained:",len(history))
 
 
-# dự đoán
+# predict
 def predict():
 
     global model
@@ -147,7 +148,7 @@ def predict():
 
     X=np.array(last).reshape((1,window,1))
 
-    prob=model.predict(X)[0][0]
+    prob=float(model.predict(X,verbose=0)[0][0])
 
     if prob > 0.5:
 
@@ -181,7 +182,7 @@ def collector():
             result=normalize(data["result"])
             total=data["total"]
 
-            if period!=last_period:
+            if period != last_period:
 
                 last_period=period
 
@@ -190,30 +191,29 @@ def collector():
                 with open(history_file,"a",encoding="utf-8") as f:
                     f.write(line)
 
-                print("Saved",period)
+                print("Saved:",period)
 
                 train_ai()
 
         except Exception as e:
 
-            print("API error",e)
+            print("API error:",e)
 
         time.sleep(2)
 
 
-# UI đẹp
+# UI
 @app.route("/")
 def home():
 
     return """
 
 <!DOCTYPE html>
-
 <html>
 
 <head>
 
-<title>AI Tài Xỉu Predictor</title>
+<title>AI Tài Xỉu</title>
 
 <style>
 
@@ -227,19 +227,20 @@ text-align:center;
 .card{
 background:#1e293b;
 padding:40px;
-margin:100px auto;
-width:300px;
+margin:120px auto;
+width:320px;
 border-radius:15px;
-box-shadow:0 0 20px #000;
+box-shadow:0 0 25px rgba(0,0,0,0.6);
 }
 
 .result{
-font-size:40px;
+font-size:48px;
 margin-top:20px;
 }
 
 .conf{
 color:#38bdf8;
+font-size:18px;
 }
 
 </style>
@@ -321,3 +322,4 @@ if __name__=="__main__":
     port=int(os.environ.get("PORT",10000))
 
     app.run(host="0.0.0.0",port=port)
+
