@@ -1,49 +1,35 @@
-import os
-import time
-import threading
+from flask import Flask, jsonify
 import requests
-import numpy as np
+import threading
+import time
+import os
 import unicodedata
+import numpy as np
 
-from datetime import datetime
-from flask import Flask
+from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
+from catboost import CatBoostClassifier
 
-from telegram import Bot
-
-from sklearn.ensemble import RandomForestClassifier
-
-
-# ==============================
-# TELEGRAM
-# ==============================
-
-TOKEN="7789180148:AAHzAdGMxWS3IWXkk-VoVpP8zoAsGkITALQ"
-CHAT_ID="-1002260844789"
-
-bot=Bot(token=TOKEN)
-
-
-# ==============================
-# CONFIG
-# ==============================
+app = Flask(__name__)
 
 API="https://phanmemdudoan.fun/apisun.php"
 
 history_file="history.txt"
 
-window=12
-max_history=500
+window=10
+max_history=1000
 
 last_period=None
-current_day=datetime.now().day
+
+latest_result=None
+latest_prediction=None
+latest_confidence=None
+status_message="Đang chờ dữ liệu..."
 
 
-app = Flask(__name__)
+if not os.path.exists(history_file):
+    open(history_file,"w").close()
 
-
-# ==============================
-# NORMALIZE
-# ==============================
 
 def normalize(text):
 
@@ -59,46 +45,53 @@ def normalize(text):
     return text
 
 
-# ==============================
-# READ HISTORY
-# ==============================
-
 def read_history():
 
     data=[]
 
-    try:
+    with open(history_file,encoding="utf-8") as f:
+
+        lines=f.readlines()
+
+    lines.reverse()
+
+    for line in lines:
+
+        p=line.strip().split(",")
+
+        if len(p)<3:
+            continue
+
+        r=normalize(p[1])
+
+        if r=="Tài":
+            data.append(1)
+
+        elif r=="Xỉu":
+            data.append(0)
+
+    return data
+
+
+def save_history(period,result,total):
+
+    lines=[]
+
+    if os.path.exists(history_file):
 
         with open(history_file,encoding="utf-8") as f:
-
             lines=f.readlines()
 
-        lines.reverse()
+    lines.append(f"{period},{result},{total}\n")
 
-        for line in lines:
+    if len(lines)>max_history:
 
-            p=line.strip().split(",")
+        lines=lines[-max_history:]
 
-            if len(p)<3:
-                continue
+    with open(history_file,"w",encoding="utf-8") as f:
 
-            r=normalize(p[1])
+        f.writelines(lines)
 
-            if r=="Tài":
-                data.append(1)
-
-            elif r=="Xỉu":
-                data.append(0)
-
-    except:
-        pass
-
-    return data[:max_history]
-
-
-# ==============================
-# DATASET
-# ==============================
 
 def build_dataset(history):
 
@@ -113,28 +106,62 @@ def build_dataset(history):
     return np.array(X),np.array(y)
 
 
-# ==============================
-# AI PREDICT
-# ==============================
-
 def ai_predict():
+
+    global status_message
 
     history=read_history()
 
-    if len(history)<50:
+    if len(history)<10:
+
+        status_message=f"Chưa đủ dữ liệu AI ({len(history)}/10)"
+
         return None
+
+    status_message="AI đang phân tích..."
 
     X,y=build_dataset(history)
 
-    model=RandomForestClassifier(
+    last=np.array(history[:window]).reshape(1,-1)
+
+    # XGBoost
+
+    xgb=XGBClassifier(
+        n_estimators=200,
+        max_depth=5,
+        learning_rate=0.1
+    )
+
+    xgb.fit(X,y)
+
+    p1=xgb.predict_proba(last)[0][1]
+
+
+    # LightGBM
+
+    lgb=LGBMClassifier(
         n_estimators=200
     )
 
-    model.fit(X,y)
+    lgb.fit(X,y)
 
-    last=np.array(history[:window]).reshape(1,-1)
+    p2=lgb.predict_proba(last)[0][1]
 
-    prob=model.predict_proba(last)[0][1]
+
+    # CatBoost
+
+    cat=CatBoostClassifier(
+        iterations=200,
+        verbose=0
+    )
+
+    cat.fit(X,y)
+
+    p3=cat.predict_proba(last)[0][1]
+
+
+    prob=(p1+p2+p3)/3
+
 
     if prob>0.5:
 
@@ -146,36 +173,18 @@ def ai_predict():
         pred="Xỉu"
         conf=(1-prob)*100
 
+
+    status_message="AI đã phân tích xong"
+
     return pred,round(conf,2)
 
-
-# ==============================
-# RESET DAILY
-# ==============================
-
-def reset_daily():
-
-    global current_day
-
-    if datetime.now().day!=current_day:
-
-        current_day=datetime.now().day
-
-        open(history_file,"w").close()
-
-        bot.send_message(
-            CHAT_ID,
-            "History reset"
-        )
-
-
-# ==============================
-# COLLECT DATA
-# ==============================
 
 def collector():
 
     global last_period
+    global latest_result
+    global latest_prediction
+    global latest_confidence
 
     while True:
 
@@ -193,9 +202,9 @@ def collector():
 
                 last_period=period
 
-                with open(history_file,"a",encoding="utf-8") as f:
+                save_history(period,result,total)
 
-                    f.write(f"{period},{result},{total}\n")
+                latest_result=result
 
                 ai=ai_predict()
 
@@ -203,54 +212,115 @@ def collector():
 
                     p,c=ai
 
-                    bot.send_message(
+                    latest_prediction=p
+                    latest_confidence=c
 
-                        CHAT_ID,
-
-                        f"Phiên {period}\n"
-                        f"KQ: {result}\n\n"
-                        f"AI dự đoán: {p}\n"
-                        f"Confidence: {c}%"
-
-                    )
+                print("Round:",period,result)
 
         except Exception as e:
 
-            print("Error:",e)
-
-        reset_daily()
+            print(e)
 
         time.sleep(15)
 
 
-# ==============================
-# WEB SERVER (GIỮ RENDER KHÔNG SLEEP)
-# ==============================
-
 @app.route("/")
 def home():
-    return "AI BOT RUNNING 24/24"
+
+    return """
+
+<html>
+
+<head>
+
+<title>AI Tai Xiu Analyzer</title>
+
+<style>
+
+body{
+background:#111;
+color:white;
+font-family:Arial;
+text-align:center;
+margin-top:100px;
+}
+
+.box{
+background:#222;
+padding:30px;
+border-radius:10px;
+width:350px;
+margin:auto;
+}
+
+.result{
+font-size:40px;
+margin:20px;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="box">
+
+<h2>AI Tai Xiu Analyzer</h2>
+
+<div id="data">Loading...</div>
+
+</div>
+
+<script>
+
+async function load(){
+
+let r=await fetch("/api")
+let d=await r.json()
+
+document.getElementById("data").innerHTML=
+
+"<div class='result'>"+(d.prediction||"-")+"</div>"+
+
+"<p>Kết quả trước: "+(d.result||"-")+"</p>"+
+
+"<p>Confidence: "+(d.confidence||"-")+"%</p>"+
+
+"<p>"+d.status+"</p>"
+
+}
+
+setInterval(load,5000)
+load()
+
+</script>
+
+</body>
+
+</html>
+
+"""
 
 
-# ==============================
-# START THREAD
-# ==============================
+@app.route("/api")
+def api():
 
-threading.Thread(
-    target=collector,
-    daemon=True
-).start()
+    return jsonify({
+
+        "result":latest_result,
+        "prediction":latest_prediction,
+        "confidence":latest_confidence,
+        "status":status_message
+
+    })
 
 
-# ==============================
-# RUN SERVER
-# ==============================
+threading.Thread(target=collector,daemon=True).start()
 
-if __name__ == "__main__":
+
+if __name__=="__main__":
 
     port=int(os.environ.get("PORT",10000))
 
-    app.run(
-        host="0.0.0.0",
-        port=port
-    )
+    app.run(host="0.0.0.0",port=port)
