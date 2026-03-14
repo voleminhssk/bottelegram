@@ -3,11 +3,11 @@ import requests
 import threading
 import time
 import os
+import pickle
 import unicodedata
 import numpy as np
 
-from tensorflow.keras.models import Sequential, load_model
-from tensorflow.keras.layers import LSTM, Dense
+from sklearn.ensemble import RandomForestClassifier
 
 app = Flask(__name__)
 app.config["JSON_AS_ASCII"] = False
@@ -15,19 +15,19 @@ app.config["JSON_AS_ASCII"] = False
 API="https://phanmemdudoan.fun/apisun.php"
 
 history_file="history.txt"
-model_file="model.h5"
+model_file="model.pkl"
 
-window=10
 last_period=None
 model=None
+window=10
 
 
-# tạo history nếu chưa có
+# tạo history
 if not os.path.exists(history_file):
     open(history_file,"w",encoding="utf-8").close()
 
 
-# chuẩn hóa chữ
+# sửa unicode tài xỉu
 def normalize(text):
 
     text=str(text)
@@ -43,7 +43,7 @@ def normalize(text):
     return text
 
 
-# đọc history
+# đọc history newest -> oldest
 def read_history():
 
     history=[]
@@ -71,24 +71,6 @@ def read_history():
     return history
 
 
-# tạo model
-def build_model():
-
-    m=Sequential()
-
-    m.add(LSTM(32,input_shape=(window,1)))
-
-    m.add(Dense(1,activation="sigmoid"))
-
-    m.compile(
-        optimizer="adam",
-        loss="binary_crossentropy",
-        metrics=["accuracy"]
-    )
-
-    return m
-
-
 # train AI
 def train_ai():
 
@@ -110,23 +92,19 @@ def train_ai():
     X=np.array(X)
     y=np.array(y)
 
-    X=X.reshape((X.shape[0],X.shape[1],1))
+    model=RandomForestClassifier(
+        n_estimators=400,
+        max_depth=10
+    )
 
-    if model is None:
+    model.fit(X,y)
 
-        if os.path.exists(model_file):
-            model=load_model(model_file)
-        else:
-            model=build_model()
+    pickle.dump(model,open(model_file,"wb"))
 
-    model.fit(X,y,epochs=3,verbose=0)
-
-    model.save(model_file)
-
-    print("AI trained:",len(history))
+    print("AI trained:",len(history),"rounds")
 
 
-# predict
+# dự đoán
 def predict():
 
     global model
@@ -134,38 +112,40 @@ def predict():
     history=read_history()
 
     if len(history) < window:
-
         return {"prediction":"Loading","confidence":0}
+
+    if model is None and os.path.exists(model_file):
+
+        model=pickle.load(open(model_file,"rb"))
 
     if model is None:
 
-        if os.path.exists(model_file):
-            model=load_model(model_file)
-        else:
-            return {"prediction":"Loading","confidence":0}
+        return {"prediction":"Loading","confidence":0}
 
     last=history[:window]
 
-    X=np.array(last).reshape((1,window,1))
+    prob=model.predict_proba([last])[0]
 
-    prob=float(model.predict(X,verbose=0)[0][0])
-
-    if prob > 0.5:
+    if prob[1] > prob[0]:
 
         return {
+
             "prediction":"Tài",
-            "confidence":round(prob*100,2)
+            "confidence":round(prob[1]*100,2)
+
         }
 
     else:
 
         return {
+
             "prediction":"Xỉu",
-            "confidence":round((1-prob)*100,2)
+            "confidence":round(prob[0]*100,2)
+
         }
 
 
-# lấy API
+# collector API nhanh
 def collector():
 
     global last_period
@@ -182,7 +162,7 @@ def collector():
             result=normalize(data["result"])
             total=data["total"]
 
-            if period != last_period:
+            if period!=last_period:
 
                 last_period=period
 
@@ -197,67 +177,20 @@ def collector():
 
         except Exception as e:
 
-            print("API error:",e)
+            print("API error",e)
 
         time.sleep(2)
 
 
-# UI
+# web
 @app.route("/")
 def home():
 
     return """
 
-<!DOCTYPE html>
-<html>
+<h1>AI Tai Xiu Predictor</h1>
 
-<head>
-
-<title>AI Tài Xỉu</title>
-
-<style>
-
-body{
-background:#0f172a;
-color:white;
-font-family:sans-serif;
-text-align:center;
-}
-
-.card{
-background:#1e293b;
-padding:40px;
-margin:120px auto;
-width:320px;
-border-radius:15px;
-box-shadow:0 0 25px rgba(0,0,0,0.6);
-}
-
-.result{
-font-size:48px;
-margin-top:20px;
-}
-
-.conf{
-color:#38bdf8;
-font-size:18px;
-}
-
-</style>
-
-</head>
-
-<body>
-
-<div class="card">
-
-<h1>AI Tài Xỉu</h1>
-
-<div id="res" class="result">Loading...</div>
-
-<div id="conf" class="conf"></div>
-
-</div>
+<div id="result">Loading...</div>
 
 <script>
 
@@ -267,9 +200,10 @@ let r=await fetch("/api/predict")
 
 let d=await r.json()
 
-document.getElementById("res").innerHTML=d.prediction
+document.getElementById("result").innerHTML=
 
-document.getElementById("conf").innerHTML="Confidence "+d.confidence+"%"
+"<h2>"+d.prediction+"</h2>"+
+"<p>"+d.confidence+"%</p>"
 
 }
 
@@ -279,37 +213,40 @@ load()
 
 </script>
 
-</body>
-
-</html>
-
 """
 
 
+# API predict
 @app.route("/api/predict")
 def api_predict():
 
     return jsonify(predict())
 
 
+# API history
 @app.route("/api/history")
 def api_history():
 
     data=[]
 
-    with open(history_file,encoding="utf-8") as f:
+    try:
 
-        for line in f.readlines()[-100:]:
+        with open(history_file,encoding="utf-8") as f:
 
-            p=line.strip().split(",")
+            for line in f.readlines()[-100:]:
 
-            data.append({
+                p=line.strip().split(",")
 
-                "period":int(p[0]),
-                "result":p[1],
-                "total":int(p[2])
+                data.append({
 
-            })
+                    "period":int(p[0]),
+                    "result":p[1],
+                    "total":int(p[2])
+
+                })
+
+    except:
+        pass
 
     return jsonify(data)
 
@@ -322,4 +259,3 @@ if __name__=="__main__":
     port=int(os.environ.get("PORT",10000))
 
     app.run(host="0.0.0.0",port=port)
-
