@@ -7,13 +7,23 @@ import unicodedata
 import numpy as np
 
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.ensemble import ExtraTreesClassifier
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.ensemble import AdaBoostClassifier
+from sklearn.ensemble import BaggingClassifier
 
-from xgboost import XGBClassifier
-from lightgbm import LGBMClassifier
-from catboost import CatBoostClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import SGDClassifier
 
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.naive_bayes import GaussianNB
+
+from sklearn.neural_network import MLPClassifier
+
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.ensemble import StackingClassifier
 
 app = Flask(__name__)
 
@@ -22,7 +32,7 @@ API="https://phanmemdudoan.fun/apisun.php"
 history_file="history.txt"
 
 window=12
-max_history=1000
+max_history=5000
 
 last_period=None
 
@@ -33,7 +43,6 @@ latest_total=None
 prediction=None
 confidence=None
 status="Đang chờ dữ liệu..."
-
 
 if not os.path.exists(history_file):
     open(history_file,"w").close()
@@ -59,8 +68,6 @@ def read_history():
 
     with open(history_file,encoding="utf-8") as f:
         lines=f.readlines()
-
-    lines.reverse()
 
     for line in lines:
 
@@ -111,15 +118,34 @@ def build_dataset(history):
     return np.array(X),np.array(y)
 
 
+def sequence_features(seq):
+
+    arr=np.array(seq)
+
+    return [
+
+        sum(arr),
+
+        np.mean(arr),
+
+        np.std(arr),
+
+        np.max(arr),
+
+        np.min(arr)
+
+    ]
+
+
 def ai_predict():
 
     global prediction,confidence,status
 
     history=read_history()
 
-    if len(history)<10:
+    if len(history)<window+10:
 
-        status=f"Cần ít nhất 10 phiên để AI phân tích ({len(history)}/10)"
+        status=f"Cần ít nhất {window+10} phiên ({len(history)}/{window+10})"
         prediction=None
         confidence=None
         return
@@ -128,42 +154,87 @@ def ai_predict():
 
     X,y=build_dataset(history)
 
-    last=np.array(history[:window]).reshape(1,-1)
+    X2=[]
 
-    models=[]
+    for row in X:
 
-    models.append(XGBClassifier(n_estimators=150))
-    models.append(LGBMClassifier(n_estimators=150))
-    models.append(CatBoostClassifier(iterations=150,verbose=0))
-    models.append(RandomForestClassifier(n_estimators=200))
-    models.append(GradientBoostingClassifier())
-    models.append(ExtraTreesClassifier(n_estimators=200))
+        feats=sequence_features(row)
 
-    probs=[]
+        X2.append(list(row)+feats)
 
-    for m in models:
+    X=np.array(X2)
+
+    last=np.array(history[-window:])
+
+    last_feats=sequence_features(last)
+
+    last=np.array(list(last)+last_feats).reshape(1,-1)
+
+    models=[
+
+        ("rf",RandomForestClassifier(n_estimators=200)),
+
+        ("et",ExtraTreesClassifier(n_estimators=200)),
+
+        ("gb",GradientBoostingClassifier()),
+
+        ("hgb",HistGradientBoostingClassifier()),
+
+        ("ada",AdaBoostClassifier(n_estimators=200)),
+
+        ("bag",BaggingClassifier()),
+
+        ("lr",LogisticRegression(max_iter=1000)),
+
+        ("sgd",SGDClassifier(loss="log_loss")),
+
+        ("knn",KNeighborsClassifier()),
+
+        ("dt",DecisionTreeClassifier()),
+
+        ("nb",GaussianNB()),
+
+        ("mlp",MLPClassifier(max_iter=500))
+
+    ]
+
+    calibrated=[]
+
+    for name,m in models:
 
         try:
 
-            m.fit(X,y)
+            c=CalibratedClassifierCV(m)
 
-            p=m.predict_proba(last)[0][1]
-
-            probs.append(p)
+            calibrated.append((name,c))
 
         except:
-            continue
+            pass
 
+    meta=LogisticRegression()
 
-    if len(probs)==0:
+    stack=StackingClassifier(
 
-        status="AI training error"
+        estimators=calibrated,
+
+        final_estimator=meta,
+
+        passthrough=True
+
+    )
+
+    try:
+
+        stack.fit(X,y)
+
+        prob=stack.predict_proba(last)[0][1]
+
+    except:
+
         prediction=None
         confidence=None
+        status="AI training error"
         return
-
-
-    prob=sum(probs)/len(probs)
 
     if prob>0.5:
 
@@ -175,7 +246,7 @@ def ai_predict():
         prediction="Xỉu"
         confidence=round((1-prob)*100,2)
 
-    status="AI Ensemble 6 Model đã phân tích"
+    status="AI PRO 12 Models + Stacking đã phân tích"
 
 
 def collector():
@@ -227,7 +298,7 @@ def home():
 
 <head>
 
-<title>AI Tai Xiu Analyzer</title>
+<title>AI Tai Xiu PRO</title>
 
 <style>
 
@@ -261,7 +332,7 @@ color:#00ffcc;
 
 <div class="box">
 
-<h2>AI Tai Xiu Analyzer</h2>
+<h2>AI Tai Xiu PRO</h2>
 
 <div id="data">Loading...</div>
 
