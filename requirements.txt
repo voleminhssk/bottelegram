@@ -2,3 +2,4 @@ flask
 requests
 scikit-learn
 gunicorn
+tensorflow numpy scikit-learn
