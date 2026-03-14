@@ -4,25 +4,29 @@ import threading
 import time
 import os
 import unicodedata
-from datetime import datetime
+import numpy as np
+
+from tensorflow.keras.models import Sequential, load_model
+from tensorflow.keras.layers import LSTM, Dense
 
 app = Flask(__name__)
 app.config["JSON_AS_ASCII"] = False
 
 API = "https://phanmemdudoan.fun/apisun.php"
 
-history_file = "history.txt"
+history_file="history.txt"
+model_file="model.h5"
 
-last_period = None
-current_day = datetime.now().day
+window=10
+last_period=None
+model=None
 
 
-# tạo history nếu chưa có
 if not os.path.exists(history_file):
     open(history_file,"w",encoding="utf-8").close()
 
 
-# sửa lỗi chữ tài xỉu
+# sửa lỗi unicode
 def normalize(text):
 
     text=str(text)
@@ -38,81 +42,125 @@ def normalize(text):
     return text
 
 
-# đọc history mới -> cũ
+# đọc history
 def read_history():
 
     data=[]
 
-    try:
+    with open(history_file,encoding="utf-8") as f:
+        lines=f.readlines()
 
-        with open(history_file,encoding="utf-8") as f:
+    lines.reverse()
 
-            lines=f.readlines()
+    for line in lines:
 
-        lines.reverse()
+        p=line.strip().split(",")
 
-        for line in lines:
+        if len(p)<3:
+            continue
 
-            p=line.strip().split(",")
+        r=normalize(p[1])
 
-            if len(p)<3:
-                continue
+        if r=="Tài":
+            data.append(1)
 
-            r=normalize(p[1])
-
-            if r=="Tài":
-                data.append(1)
-
-            elif r=="Xỉu":
-                data.append(0)
-
-    except:
-        pass
+        elif r=="Xỉu":
+            data.append(0)
 
     return data
 
 
-# AI phân tích
-def ai_analyze():
+# tạo model LSTM
+def build_model():
 
-    history = read_history()
+    m=Sequential()
 
-    if len(history)==0:
+    m.add(LSTM(32,input_shape=(window,1)))
 
-        return {
-            "prediction":"Loading",
-            "confidence":0
-        }
+    m.add(Dense(1,activation="sigmoid"))
 
-    tai = history.count(1)
-    xiu = history.count(0)
+    m.compile(
+        optimizer="adam",
+        loss="binary_crossentropy",
+        metrics=["accuracy"]
+    )
 
-    total = tai + xiu
+    return m
 
-    if total == 0:
+
+# train AI
+def train_ai():
+
+    global model
+
+    history=read_history()
+
+    if len(history) < window+5:
+        return
+
+    X=[]
+    y=[]
+
+    for i in range(window,len(history)):
+
+        X.append(history[i-window:i])
+        y.append(history[i])
+
+    X=np.array(X)
+    y=np.array(y)
+
+    X=X.reshape((X.shape[0],X.shape[1],1))
+
+    if model is None:
+
+        if os.path.exists(model_file):
+            model=load_model(model_file)
+        else:
+            model=build_model()
+
+    model.fit(X,y,epochs=5,verbose=0)
+
+    model.save(model_file)
+
+    print("AI trained:",len(history))
+
+
+# dự đoán
+def predict():
+
+    global model
+
+    history=read_history()
+
+    if len(history) < window:
+
         return {"prediction":"Loading","confidence":0}
 
-    tai_rate = tai/total
-    xiu_rate = xiu/total
+    if model is None:
 
-    if tai_rate > xiu_rate:
+        if os.path.exists(model_file):
+            model=load_model(model_file)
+        else:
+            return {"prediction":"Loading","confidence":0}
+
+    last=history[:window]
+
+    X=np.array(last).reshape((1,window,1))
+
+    prob=model.predict(X)[0][0]
+
+    if prob > 0.5:
 
         return {
-
             "prediction":"Tài",
-            "confidence":round(tai_rate*100,2),
-            "rounds":total
-
+            "confidence":round(prob*100,2)
         }
 
     else:
 
         return {
-
             "prediction":"Xỉu",
-            "confidence":round(xiu_rate*100,2),
-            "rounds":total
-
+            "confidence":round((1-prob)*100,2)
         }
 
 
@@ -125,7 +173,7 @@ def collector():
 
         try:
 
-            r=requests.get(API,timeout=10)
+            r=requests.get(API,timeout=5)
 
             data=r.json()
 
@@ -142,104 +190,130 @@ def collector():
                 with open(history_file,"a",encoding="utf-8") as f:
                     f.write(line)
 
-                print("Saved:",period,result)
+                print("Saved",period)
+
+                train_ai()
 
         except Exception as e:
 
-            print("API error:",e)
+            print("API error",e)
 
-        time.sleep(5)
-
-
-# reset mỗi ngày
-def reset_daily():
-
-    global current_day
-
-    while True:
-
-        if datetime.now().day != current_day:
-
-            current_day = datetime.now().day
-
-            open(history_file,"w").close()
-
-            print("History reset")
-
-        time.sleep(60)
+        time.sleep(2)
 
 
-# web
+# UI đẹp
 @app.route("/")
 def home():
 
     return """
 
-<h1>AI Tai Xiu Analyzer</h1>
+<!DOCTYPE html>
 
-<div id="result">Loading...</div>
+<html>
+
+<head>
+
+<title>AI Tài Xỉu Predictor</title>
+
+<style>
+
+body{
+background:#0f172a;
+color:white;
+font-family:sans-serif;
+text-align:center;
+}
+
+.card{
+background:#1e293b;
+padding:40px;
+margin:100px auto;
+width:300px;
+border-radius:15px;
+box-shadow:0 0 20px #000;
+}
+
+.result{
+font-size:40px;
+margin-top:20px;
+}
+
+.conf{
+color:#38bdf8;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="card">
+
+<h1>AI Tài Xỉu</h1>
+
+<div id="res" class="result">Loading...</div>
+
+<div id="conf" class="conf"></div>
+
+</div>
 
 <script>
 
 async function load(){
 
 let r=await fetch("/api/predict")
+
 let d=await r.json()
 
-document.getElementById("result").innerHTML=
+document.getElementById("res").innerHTML=d.prediction
 
-"<h2>"+d.prediction+"</h2>"+
-"<p>Confidence: "+d.confidence+"%</p>"+
-"<p>Rounds analyzed: "+d.rounds+"</p>"
+document.getElementById("conf").innerHTML="Confidence "+d.confidence+"%"
 
 }
 
-setInterval(load,5000)
+setInterval(load,3000)
+
 load()
 
 </script>
 
+</body>
+
+</html>
+
 """
 
 
-# api predict
 @app.route("/api/predict")
 def api_predict():
 
-    return jsonify(ai_analyze())
+    return jsonify(predict())
 
 
-# api history
 @app.route("/api/history")
 def api_history():
 
     data=[]
 
-    try:
+    with open(history_file,encoding="utf-8") as f:
 
-        with open(history_file,encoding="utf-8") as f:
+        for line in f.readlines()[-100:]:
 
-            for line in f.readlines():
+            p=line.strip().split(",")
 
-                p=line.strip().split(",")
+            data.append({
 
-                data.append({
+                "period":int(p[0]),
+                "result":p[1],
+                "total":int(p[2])
 
-                    "period":int(p[0]),
-                    "result":p[1],
-                    "total":int(p[2])
-
-                })
-
-    except:
-        pass
+            })
 
     return jsonify(data)
 
 
-# threads
 threading.Thread(target=collector,daemon=True).start()
-threading.Thread(target=reset_daily,daemon=True).start()
 
 
 if __name__=="__main__":
@@ -247,4 +321,3 @@ if __name__=="__main__":
     port=int(os.environ.get("PORT",10000))
 
     app.run(host="0.0.0.0",port=port)
-
