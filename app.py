@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify
 import requests
 import threading
 import time
@@ -10,7 +10,7 @@ API="https://phanmemdudoan.fun/apisun.php"
 
 app = Flask(__name__)
 
-# tạo file nếu chưa có
+# tạo file history nếu chưa có
 if not os.path.exists("history.txt"):
     open("history.txt","w").close()
 
@@ -147,7 +147,70 @@ def predict():
 
 @app.route("/")
 def home():
-    return render_template("index.html")
+
+    return """
+    <!DOCTYPE html>
+    <html>
+
+    <head>
+
+    <title>AI Tài Xỉu</title>
+
+    <style>
+
+    body{
+    background:#0f172a;
+    color:white;
+    text-align:center;
+    font-family:sans-serif;
+    margin-top:120px;
+    }
+
+    .box{
+    background:#1e293b;
+    padding:40px;
+    width:300px;
+    margin:auto;
+    border-radius:15px;
+    font-size:30px;
+    }
+
+    </style>
+
+    </head>
+
+    <body>
+
+    <h1>AI Dự Đoán Tài Xỉu</h1>
+
+    <div class="box" id="predict">
+    Loading...
+    </div>
+
+    <script>
+
+    async function load(){
+
+    let r=await fetch("/api/predict")
+
+    let d=await r.json()
+
+    document.getElementById("predict").innerHTML=
+
+    `<h2>${d.prediction}</h2>
+    <p>${d.confidence}%</p>`
+
+    }
+
+    setInterval(load,5000)
+
+    load()
+
+    </script>
+
+    </body>
+    </html>
+    """
 
 
 @app.route("/api/predict")
@@ -169,7 +232,7 @@ def api_history():
     return jsonify(data)
 
 
-# chạy thread
+# chạy bot nền
 threading.Thread(target=collector).start()
 threading.Thread(target=train_ai).start()
 
