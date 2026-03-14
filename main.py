@@ -1,33 +1,47 @@
-from flask import Flask, jsonify
-import requests
-import threading
-import time
 import os
+import time
+import requests
+import numpy as np
 import unicodedata
+
 from datetime import datetime
 
-app = Flask(__name__)
-app.config["JSON_AS_ASCII"] = False
+from telegram import Bot
 
-API = "https://phanmemdudoan.fun/apisun.php"
+import tensorflow as tf
+from tensorflow.keras.layers import *
+from tensorflow.keras.models import Model, load_model
 
-history_file = "history.txt"
-
-last_period = None
-current_day = datetime.now().day
+from sklearn.ensemble import RandomForestClassifier
 
 
-# tạo history
+TOKEN="7789180148:AAHzAdGMxWS3IWXkk-VoVpP8zoAsGkITALQ"
+CHAT_ID="-1002260844789"
+
+bot=Bot(token=TOKEN)
+
+
+API="https://phanmemdudoan.fun/apisun.php"
+
+history_file="history.txt"
+
+window=12
+max_history=500
+train_interval=20
+
+last_period=None
+round_count=0
+current_day=datetime.now().day
+
+
 if not os.path.exists(history_file):
-    open(history_file,"w",encoding="utf-8").close()
+    open(history_file,"w").close()
 
 
-# chuẩn hóa tài xỉu
 def normalize(text):
 
     text=str(text)
-    text=unicodedata.normalize("NFC",text)
-    text=text.lower()
+    text=unicodedata.normalize("NFC",text).lower()
 
     if "tai" in text or "tài" in text:
         return "Tài"
@@ -38,140 +52,193 @@ def normalize(text):
     return text
 
 
-# đọc tổng xúc xắc
-def read_totals():
+def read_history():
 
-    totals=[]
+    data=[]
 
-    try:
+    with open(history_file,encoding="utf-8") as f:
 
-        with open(history_file,encoding="utf-8") as f:
+        lines=f.readlines()
 
-            for line in f.readlines():
+    lines.reverse()
 
-                p=line.strip().split(",")
+    for line in lines:
 
-                if len(p)<3:
-                    continue
+        p=line.strip().split(",")
 
-                try:
-                    totals.append(int(p[2]))
-                except:
-                    pass
+        if len(p)<3:
+            continue
 
-    except:
-        pass
+        r=normalize(p[1])
 
-    return totals
+        if r=="Tài":
+            data.append(1)
 
+        elif r=="Xỉu":
+            data.append(0)
 
-# AI phân tích
-def ai_analyze():
-
-    totals = read_totals()
-
-    n=len(totals)
-
-    if n<6:
-
-        return {
-            "prediction":"Loading",
-            "confidence":0,
-            "rounds":n
-        }
+    return data[:max_history]
 
 
-    # chuỗi 3 phiên gần nhất
-    pattern = totals[-3:]
+def build_dataset(history):
+
+    X=[]
+    y=[]
+
+    for i in range(len(history)-window):
+
+        X.append(history[i:i+window])
+        y.append(history[i+window])
+
+    return np.array(X),np.array(y)
 
 
-    tai=0
-    xiu=0
-    matches=0
+# Transformer nhẹ
+def transformer_model():
+
+    inp=Input(shape=(window,1))
+
+    x=MultiHeadAttention(num_heads=2,key_dim=16)(inp,inp)
+
+    x=LayerNormalization()(x)
+
+    x=Dense(32,activation="relu")(x)
+
+    x=GlobalAveragePooling1D()(x)
+
+    out=Dense(1,activation="sigmoid")(x)
+
+    model=Model(inp,out)
+
+    model.compile(
+        optimizer="adam",
+        loss="binary_crossentropy"
+    )
+
+    return model
 
 
-    # tìm pattern trong history
-    for i in range(n-4):
+# LSTM
+def lstm_model():
 
-        if totals[i:i+3]==pattern:
+    inp=Input(shape=(window,1))
 
-            next_total=totals[i+3]
+    x=LSTM(32)(inp)
 
-            matches+=1
+    out=Dense(1,activation="sigmoid")(x)
 
-            if next_total>=11:
-                tai+=1
-            else:
-                xiu+=1
+    model=Model(inp,out)
 
+    model.compile(
+        optimizer="adam",
+        loss="binary_crossentropy"
+    )
 
-    # nếu trùng >=3 lần
-    if matches>=3:
-
-        if tai>xiu:
-
-            conf=tai/(tai+xiu)*100
-
-            return {
-                "prediction":"Tài",
-                "confidence":round(conf,2),
-                "rounds":n,
-                "pattern":pattern,
-                "matches":matches
-            }
-
-        else:
-
-            conf=xiu/(tai+xiu)*100
-
-            return {
-                "prediction":"Xỉu",
-                "confidence":round(conf,2),
-                "rounds":n,
-                "pattern":pattern,
-                "matches":matches
-            }
+    return model
 
 
-    # fallback AI nếu không đủ pattern
-    tai_score=0
-    xiu_score=0
+# Train AI
+def train_models(history):
 
+    X,y=build_dataset(history)
 
-    for t in totals:
+    X=X.reshape((X.shape[0],X.shape[1],1))
 
-        if t>=11:
-            tai_score+=1
-        else:
-            xiu_score+=1
+    # transformer
 
-
-    total=tai_score+xiu_score
-
-
-    if tai_score>xiu_score:
-
-        return {
-            "prediction":"Tài",
-            "confidence":round(tai_score/total*100,2),
-            "rounds":n,
-            "pattern":"AI fallback"
-        }
-
+    if os.path.exists("transformer.h5"):
+        model=load_model("transformer.h5")
     else:
+        model=transformer_model()
 
-        return {
-            "prediction":"Xỉu",
-            "confidence":round(xiu_score/total*100,2),
-            "rounds":n,
-            "pattern":"AI fallback"
-        }
+    model.fit(X,y,epochs=2,verbose=0)
+    model.save("transformer.h5")
+
+    # lstm
+
+    if os.path.exists("lstm.h5"):
+        model=load_model("lstm.h5")
+    else:
+        model=lstm_model()
+
+    model.fit(X,y,epochs=2,verbose=0)
+    model.save("lstm.h5")
 
 
-# lấy API
+# AI Predict
+def ai_predict():
+
+    history=read_history()
+
+    if len(history)<50:
+        return None
+
+    last=np.array(history[:window]).reshape((1,window,1))
+
+    # transformer
+
+    tf_model=load_model("transformer.h5")
+
+    p1=tf_model.predict(last,verbose=0)[0][0]
+
+    # lstm
+
+    lstm=load_model("lstm.h5")
+
+    p2=lstm.predict(last,verbose=0)[0][0]
+
+    # random forest
+
+    X,y=build_dataset(history)
+
+    rf=RandomForestClassifier(n_estimators=100)
+
+    rf.fit(X,y)
+
+    p3=rf.predict_proba(last.reshape(1,-1))[0][1]
+
+    # markov
+
+    markov={0:{0:1,1:1},1:{0:1,1:1}}
+
+    for i in range(len(history)-1):
+        markov[history[i]][history[i+1]]+=1
+
+    last_state=history[0]
+
+    p4=markov[last_state][1]/(
+        markov[last_state][0]+markov[last_state][1]
+    )
+
+    prob=(p1+p2+p3+p4)/4
+
+    if prob>0.5:
+        pred="Tài"
+        conf=prob*100
+    else:
+        pred="Xỉu"
+        conf=(1-prob)*100
+
+    return pred,round(conf,2)
+
+
+def reset_daily():
+
+    global current_day
+
+    if datetime.now().day!=current_day:
+
+        current_day=datetime.now().day
+
+        open(history_file,"w").close()
+
+        bot.send_message(CHAT_ID,"History reset")
+
+
 def collector():
 
     global last_period
+    global round_count
 
     while True:
 
@@ -181,135 +248,51 @@ def collector():
 
             data=r.json()
 
-            period=data.get("period")
-            result=normalize(data.get("result"))
-            total=data.get("total")
-
-            if not period or not total:
-                time.sleep(3)
-                continue
-
+            period=data["period"]
+            result=normalize(data["result"])
+            total=data["total"]
 
             if period!=last_period:
 
                 last_period=period
 
-                line=f"{period},{result},{total}\n"
+                round_count+=1
 
                 with open(history_file,"a",encoding="utf-8") as f:
-                    f.write(line)
+                    f.write(f"{period},{result},{total}\n")
 
-                print("Saved:",period,result,total)
+                history=read_history()
+
+                if round_count % train_interval == 0:
+
+                    train_models(history)
+
+                ai=ai_predict()
+
+                if ai:
+
+                    p,c=ai
+
+                    bot.send_message(
+
+                        CHAT_ID,
+
+                        f"Phiên {period}\n"
+                        f"KQ {result}\n\n"
+                        f"AI dự đoán: {p}\n"
+                        f"Confidence: {c}%"
+
+                    )
 
         except Exception as e:
 
-            print("API error:",e)
+            print(e)
 
-        time.sleep(3)
+        reset_daily()
 
-
-# reset history mỗi ngày
-def reset_daily():
-
-    global current_day
-
-    while True:
-
-        if datetime.now().day!=current_day:
-
-            current_day=datetime.now().day
-
-            open(history_file,"w",encoding="utf-8").close()
-
-            print("History reset")
-
-        time.sleep(60)
+        time.sleep(15)
 
 
-# web
-@app.route("/")
-def home():
+print("RENDER AI BOT RUNNING")
 
-    return """
-
-<h1>AI Tai Xiu Pattern Analyzer</h1>
-
-<div id="result">Loading...</div>
-
-<script>
-
-async function load(){
-
-let r=await fetch("/api/predict")
-let d=await r.json()
-
-document.getElementById("result").innerHTML=
-
-"<h2>"+d.prediction+"</h2>"+
-"<p>Confidence: "+d.confidence+"%</p>"+
-"<p>Rounds analyzed: "+d.rounds+"</p>"+
-"<p>Pattern: "+d.pattern+"</p>"
-
-}
-
-setInterval(load,5000)
-load()
-
-</script>
-
-"""
-
-
-# api predict
-@app.route("/api/predict")
-def api_predict():
-
-    return jsonify(ai_analyze())
-
-
-# api history
-@app.route("/api/history")
-def api_history():
-
-    data=[]
-
-    try:
-
-        with open(history_file,encoding="utf-8") as f:
-
-            for line in f.readlines():
-
-                p=line.strip().split(",")
-
-                if len(p)<3:
-                    continue
-
-                try:
-
-                    data.append({
-
-                        "period":int(p[0]),
-                        "result":p[1],
-                        "total":int(p[2])
-
-                    })
-
-                except:
-                    pass
-
-    except:
-        pass
-
-    return jsonify(data)
-
-
-# threads
-threading.Thread(target=collector,daemon=True).start()
-threading.Thread(target=reset_daily,daemon=True).start()
-
-
-if __name__=="__main__":
-
-    port=int(os.environ.get("PORT",10000))
-
-    app.run(host="0.0.0.0",port=port)
+collector()
