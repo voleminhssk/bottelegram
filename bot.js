@@ -4,8 +4,8 @@ const TelegramBot=require("node-telegram-bot-api")
 const predict=require("./ai")
 const {exec}=require("child_process")
 
-const TOKEN="BOT_TOKEN"
-const CHAT_ID="CHAT_ID"
+const TOKEN="7789180148:AAHzAdGMxWS3IWXkk-VoVpP8zoAsGkITALQ"
+const CHAT_ID="-1002260844789"
 
 const API="https://phanmemdudoan.fun/apisun.php"
 
