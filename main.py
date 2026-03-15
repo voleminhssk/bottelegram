@@ -36,7 +36,7 @@ latest_total=None
 
 prediction=None
 confidence=None
-status="AI GOD MODE loading..."
+status="AI ULTRA GOD MODE loading..."
 
 history_count=0
 dataset_size=0
@@ -122,29 +122,28 @@ def sequence_features(seq):
     ]
 
 
+# =================
+# ADVANCED AI
+# =================
+
 def markov_predict(history):
 
     trans=[[1,1],[1,1]]
 
     for i in range(len(history)-1):
 
-        a=history[i]
-        b=history[i+1]
-
-        trans[a][b]+=1
+        trans[history[i]][history[i+1]]+=1
 
     last=history[-1]
 
-    prob=trans[last][1]/(trans[last][0]+trans[last][1])
-
-    return prob
+    return trans[last][1]/(trans[last][0]+trans[last][1])
 
 
 def entropy_predict(history):
 
     p=sum(history)/len(history)
 
-    if p==0 or p==1:
+    if p in [0,1]:
         return 0.5
 
     entropy=-(p*math.log2(p)+(1-p)*math.log2(1-p))
@@ -154,18 +153,103 @@ def entropy_predict(history):
 
 def montecarlo(history):
 
-    trials=1000
-
-    count=0
+    trials=500
 
     p=sum(history)/len(history)
 
-    for _ in range(trials):
+    return sum(random.random()<p for _ in range(trials))/trials
+
+
+# =================
+# TRANSFORMER STYLE
+# =================
+
+def transformer_ai(history):
+
+    weights=np.linspace(1,2,len(history))
+
+    weighted=np.array(history)*weights
+
+    return weighted.sum()/weights.sum()
+
+
+# =================
+# REINFORCEMENT
+# =================
+
+def rl_predict(history):
+
+    reward=0
+
+    for i in range(1,len(history)):
+
+        if history[i]==history[i-1]:
+            reward+=1
+        else:
+            reward-=1
+
+    p=sum(history)/len(history)
+
+    return p + reward/len(history)/5
+
+
+# =================
+# MONTE CARLO TREE
+# =================
+
+def mcts_predict(history):
+
+    sims=200
+
+    score=0
+
+    p=sum(history)/len(history)
+
+    for _ in range(sims):
 
         if random.random()<p:
-            count+=1
+            score+=1
 
-    return count/trials
+    return score/sims
+
+
+# =================
+# GENETIC FEATURE
+# =================
+
+def genetic_predict(history):
+
+    pop=50
+
+    best=0
+
+    for _ in range(pop):
+
+        w=random.random()
+
+        p=sum(history)/len(history)*w
+
+        best=max(best,p)
+
+    return best
+
+
+# =================
+# DEEP PATTERN
+# =================
+
+def deep_pattern(history):
+
+    last=history[-5:]
+
+    pattern_count=0
+
+    for i in range(len(history)-5):
+
+        if history[i:i+5]==last:
+            pattern_count+=1
+
+    return pattern_count/(len(history)+1)
 
 
 def ai_predict():
@@ -198,7 +282,6 @@ def ai_predict():
     y=np.array(y)
 
     last_seq=history[-window:]
-
     last_feats=sequence_features(last_seq)
 
     last=np.array(last_seq+last_feats).reshape(1,-1)
@@ -231,16 +314,20 @@ def ai_predict():
 
             m.fit(X,y)
 
-            p=m.predict_proba(last)[0][1]
-
-            probs.append(p)
+            probs.append(m.predict_proba(last)[0][1])
 
         except:
             pass
 
+
     probs.append(markov_predict(history))
     probs.append(entropy_predict(history))
     probs.append(montecarlo(history))
+    probs.append(transformer_ai(history))
+    probs.append(rl_predict(history))
+    probs.append(mcts_predict(history))
+    probs.append(genetic_predict(history))
+    probs.append(deep_pattern(history))
 
     prob=np.mean(probs)
 
@@ -254,7 +341,7 @@ def ai_predict():
         prediction="Xỉu"
         confidence=round((1-prob)*100,2)
 
-    status=f"AI GOD MODE | {len(probs)} models | Dataset {dataset_size}"
+    status=f"AI ULTRA GOD MODE | {len(probs)} models | Dataset {dataset_size}"
 
 
 def collector():
@@ -303,12 +390,12 @@ def home():
 
 <head>
 
-<title>AI Tài Xỉu GOD MODE</title>
+<title>AI TÀI XỈU ULTRA GOD MODE</title>
 
 <style>
 
 body{
-background:#0f172a;
+background:#020617;
 color:white;
 font-family:Arial;
 text-align:center;
@@ -316,23 +403,18 @@ margin-top:80px;
 }
 
 .box{
-background:#1e293b;
-padding:35px;
+background:#0f172a;
+padding:40px;
 border-radius:15px;
-width:360px;
+width:380px;
 margin:auto;
-box-shadow:0 0 20px rgba(0,255,200,0.3);
+box-shadow:0 0 25px #00ffc8;
 }
 
 .result{
-font-size:45px;
+font-size:50px;
 margin:20px;
 color:#00ffc8;
-}
-
-.info{
-margin:6px;
-font-size:15px;
 }
 
 </style>
@@ -343,7 +425,7 @@ font-size:15px;
 
 <div class="box">
 
-<h2>AI TÀI XỈU GOD MODE</h2>
+<h2>AI TÀI XỈU ULTRA GOD MODE</h2>
 
 <div id="data">Loading...</div>
 
@@ -360,19 +442,19 @@ document.getElementById("data").innerHTML=
 
 "<div class='result'>"+(d.prediction||"-")+"</div>"+
 
-"<div class='info'>Phiên trước: "+(d.period||"-")+"</div>"+
+"<p>Phiên trước: "+(d.period||"-")+"</p>"+
 
-"<div class='info'>Kết quả: "+(d.result||"-")+"</div>"+
+"<p>Kết quả: "+(d.result||"-")+"</p>"+
 
-"<div class='info'>Tổng xúc xắc: "+(d.total||"-")+" 🎲</div>"+
+"<p>Tổng xúc xắc: "+(d.total||"-")+" 🎲</p>"+
 
-"<div class='info'>Confidence: "+(d.confidence||"-")+"%</div>"+
+"<p>Confidence: "+(d.confidence||"-")+"%</p>"+
 
-"<div class='info'>History: "+(d.history)+" / 1200</div>"+
+"<p>History: "+(d.history)+" / 1200</p>"+
 
-"<div class='info'>Dataset AI: "+(d.dataset)+"</div>"+
+"<p>Dataset AI: "+(d.dataset)+"</p>"+
 
-"<div class='info'>"+d.status+"</div>"
+"<p>"+d.status+"</p>"
 
 }
 
@@ -413,4 +495,5 @@ if __name__=="__main__":
     port=int(os.environ.get("PORT",10000))
 
     app.run(host="0.0.0.0",port=port)
+
 
