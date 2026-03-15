@@ -5,25 +5,21 @@ import time
 import os
 import unicodedata
 import numpy as np
+import random
+import math
 
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.ensemble import ExtraTreesClassifier
-from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.ensemble import HistGradientBoostingClassifier
-from sklearn.ensemble import AdaBoostClassifier
-from sklearn.ensemble import BaggingClassifier
-
-from sklearn.linear_model import LogisticRegression
-from sklearn.linear_model import SGDClassifier
-
+from sklearn.ensemble import RandomForestClassifier,ExtraTreesClassifier,GradientBoostingClassifier,HistGradientBoostingClassifier,AdaBoostClassifier,BaggingClassifier
+from sklearn.linear_model import LogisticRegression,SGDClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.naive_bayes import GaussianNB
-
 from sklearn.neural_network import MLPClassifier
-
 from sklearn.calibration import CalibratedClassifierCV
-from sklearn.ensemble import StackingClassifier
+from sklearn.ensemble import StackingClassifier,VotingClassifier
+
+import xgboost as xgb
+import lightgbm as lgb
+from catboost import CatBoostClassifier
 
 app = Flask(__name__)
 
@@ -42,9 +38,11 @@ latest_total=None
 
 prediction=None
 confidence=None
-status="Đang chờ dữ liệu..."
+status="AI GOD MODE loading..."
 
 history_count=0
+dataset_size=0
+
 
 if not os.path.exists(history_file):
     open(history_file,"w").close()
@@ -111,19 +109,6 @@ def save_history(period,result,total):
         f.writelines(lines)
 
 
-def build_dataset(history):
-
-    X=[]
-    y=[]
-
-    for i in range(len(history)-window):
-
-        X.append(history[i:i+window])
-        y.append(history[i+window])
-
-    return np.array(X),np.array(y)
-
-
 def sequence_features(seq):
 
     arr=np.array(seq)
@@ -139,89 +124,141 @@ def sequence_features(seq):
     ]
 
 
+# =====================
+# MARKOV CHAIN AI
+# =====================
+
+def markov_predict(history):
+
+    trans=[[1,1],[1,1]]
+
+    for i in range(len(history)-1):
+
+        a=history[i]
+        b=history[i+1]
+
+        trans[a][b]+=1
+
+    last=history[-1]
+
+    prob=trans[last][1]/(trans[last][0]+trans[last][1])
+
+    return prob
+
+
+# =====================
+# ENTROPY AI
+# =====================
+
+def entropy_predict(history):
+
+    p=sum(history)/len(history)
+
+    if p==0 or p==1:
+        return 0.5
+
+    entropy=-(p*math.log2(p)+(1-p)*math.log2(1-p))
+
+    return p*(1-entropy)
+
+
+# =====================
+# MONTE CARLO
+# =====================
+
+def montecarlo(history):
+
+    trials=1000
+
+    count=0
+
+    p=sum(history)/len(history)
+
+    for _ in range(trials):
+
+        if random.random()<p:
+            count+=1
+
+    return count/trials
+
+
 def ai_predict():
 
-    global prediction,confidence,status
+    global prediction,confidence,status,dataset_size
 
     history=read_history()
 
-    if len(history)<window+10:
+    dataset_size=len(history)
 
-        status=f"Cần ít nhất {window+10} phiên ({len(history)}/{window+10})"
-        prediction=None
-        confidence=None
+    if dataset_size<window+10:
+
+        status=f"Cần {window+10} phiên ({dataset_size})"
         return
 
-    status="AI đang phân tích..."
+    X=[]
+    y=[]
 
-    X,y=build_dataset(history)
+    for i in range(dataset_size-window):
 
-    X2=[]
+        seq=history[i:i+window]
 
-    for row in X:
+        feats=sequence_features(seq)
 
-        feats=sequence_features(row)
+        X.append(seq+feats)
 
-        X2.append(list(row)+feats)
+        y.append(history[i+window])
 
-    X=np.array(X2)
+    X=np.array(X)
+    y=np.array(y)
 
-    last=np.array(history[-window:])
+    last_seq=history[-window:]
 
-    last_feats=sequence_features(last)
+    last_feats=sequence_features(last_seq)
 
-    last=np.array(list(last)+last_feats).reshape(1,-1)
+    last=np.array(last_seq+last_feats).reshape(1,-1)
 
     models=[
 
-        ("rf",RandomForestClassifier(n_estimators=200)),
-        ("et",ExtraTreesClassifier(n_estimators=200)),
-        ("gb",GradientBoostingClassifier()),
-        ("hgb",HistGradientBoostingClassifier()),
-        ("ada",AdaBoostClassifier(n_estimators=200)),
-        ("bag",BaggingClassifier()),
-        ("lr",LogisticRegression(max_iter=1000)),
-        ("sgd",SGDClassifier(loss="log_loss")),
-        ("knn",KNeighborsClassifier()),
-        ("dt",DecisionTreeClassifier()),
-        ("nb",GaussianNB()),
-        ("mlp",MLPClassifier(max_iter=500))
+    ("rf",RandomForestClassifier(200)),
+    ("et",ExtraTreesClassifier(200)),
+    ("gb",GradientBoostingClassifier()),
+    ("hgb",HistGradientBoostingClassifier()),
+    ("ada",AdaBoostClassifier()),
+    ("bag",BaggingClassifier()),
+    ("lr",LogisticRegression(max_iter=1000)),
+    ("sgd",SGDClassifier(loss="log_loss")),
+    ("knn",KNeighborsClassifier()),
+    ("dt",DecisionTreeClassifier()),
+    ("nb",GaussianNB()),
+    ("mlp",MLPClassifier(max_iter=500)),
+    ("xgb",xgb.XGBClassifier()),
+    ("lgb",lgb.LGBMClassifier()),
+    ("cat",CatBoostClassifier(verbose=0))
 
     ]
 
-    calibrated=[]
+    probs=[]
 
     for name,m in models:
 
         try:
 
-            c=CalibratedClassifierCV(m)
-            calibrated.append((name,c))
+            m.fit(X,y)
+
+            p=m.predict_proba(last)[0][1]
+
+            probs.append(p)
+
         except:
             pass
 
-    meta=LogisticRegression()
+    # Probability AI
 
-    stack=StackingClassifier(
+    probs.append(markov_predict(history))
+    probs.append(entropy_predict(history))
+    probs.append(montecarlo(history))
 
-        estimators=calibrated,
-        final_estimator=meta,
-        passthrough=True
-
-    )
-
-    try:
-
-        stack.fit(X,y)
-
-        prob=stack.predict_proba(last)[0][1]
-
-    except:
-
-        prediction=None
-        confidence=None
-        status="AI training error"
-        return
+    prob=np.mean(probs)
 
     if prob>0.5:
 
@@ -233,15 +270,12 @@ def ai_predict():
         prediction="Xỉu"
         confidence=round((1-prob)*100,2)
 
-    status=f"AI PRO 12 Models | Dataset {history_count} phiên"
+    status=f"AI GOD MODE | {len(probs)} models | Dataset {dataset_size}"
 
 
 def collector():
 
-    global last_period
-    global latest_period
-    global latest_result
-    global latest_total
+    global last_period,latest_period,latest_result,latest_total
 
     while True:
 
@@ -276,93 +310,6 @@ def collector():
         time.sleep(15)
 
 
-@app.route("/")
-def home():
-
-    return """
-
-<html>
-
-<head>
-
-<title>AI Tai Xiu PRO</title>
-
-<style>
-
-body{
-background:#111;
-color:white;
-font-family:Arial;
-text-align:center;
-margin-top:80px;
-}
-
-.box{
-background:#222;
-padding:30px;
-border-radius:10px;
-width:360px;
-margin:auto;
-}
-
-.result{
-font-size:40px;
-margin:20px;
-color:#00ffcc;
-}
-
-</style>
-
-</head>
-
-<body>
-
-<div class="box">
-
-<h2>AI Tai Xiu PRO</h2>
-
-<div id="data">Loading...</div>
-
-</div>
-
-<script>
-
-async function load(){
-
-let r=await fetch("/api")
-let d=await r.json()
-
-document.getElementById("data").innerHTML=
-
-"<div class='result'>"+(d.prediction||"-")+"</div>"+
-
-"<p>Phiên trước: "+(d.period||"-")+"</p>"+
-
-"<p>Kết quả: "+(d.result||"-")+"</p>"+
-
-"<p>Tổng xúc xắc: "+(d.total||"-")+" 🎲</p>"+
-
-"<p>Confidence: "+(d.confidence||"-")+"%</p>"+
-
-"<p>History: "+(d.history)+" / 1200 phiên</p>"+
-
-"<p>"+d.status+"</p>"
-
-}
-
-setInterval(load,5000)
-
-load()
-
-</script>
-
-</body>
-
-</html>
-
-"""
-
-
 @app.route("/api")
 def api():
 
@@ -374,13 +321,13 @@ def api():
         "prediction":prediction,
         "confidence":confidence,
         "status":status,
-        "history":history_count
+        "history":history_count,
+        "dataset":dataset_size
 
     })
 
 
 threading.Thread(target=collector,daemon=True).start()
-
 
 if __name__=="__main__":
 
