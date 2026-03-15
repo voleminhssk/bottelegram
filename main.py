@@ -6,13 +6,8 @@ import os
 import numpy as np
 import random
 
-from sklearn.ensemble import RandomForestClassifier,ExtraTreesClassifier
+from sklearn.ensemble import RandomForestClassifier,GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.naive_bayes import GaussianNB
-
-import xgboost as xgb
-import lightgbm as lgb
 
 app=Flask(__name__)
 
@@ -21,7 +16,7 @@ API="https://phanmemdudoan.fun/apisun.php"
 history_file="history.txt"
 
 window=12
-max_history=10000
+max_history=2000
 
 latest_period=None
 latest_result=None
@@ -31,26 +26,12 @@ prediction=None
 confidence=None
 dataset_size=0
 
-status="AI SUPREME READY"
-progress=0
+status="BOT đang khởi động"
 
 last_period=None
 
-model_score={
-
-"ml":1,
-"markov":1,
-"pattern":1,
-"monte":1,
-"market":1
-
-}
-
-if not os.path.exists(history_file):
-    open(history_file,"w").close()
-
 # =====================
-# NORMALIZE
+# NORMALIZE RESULT
 # =====================
 
 def normalize(r):
@@ -73,6 +54,9 @@ def read_history():
 
     data=[]
 
+    if not os.path.exists(history_file):
+        return data
+
     with open(history_file) as f:
 
         for line in f:
@@ -84,7 +68,7 @@ def read_history():
 
             data.append(normalize(p[1]))
 
-    return data
+    return data[-max_history:]
 
 
 def save_history(period,result,total):
@@ -105,7 +89,7 @@ def save_history(period,result,total):
         f.writelines(lines)
 
 # =====================
-# FEATURES
+# FEATURE ENGINEERING
 # =====================
 
 def features(seq):
@@ -123,10 +107,10 @@ def features(seq):
     ]
 
 # =====================
-# MACHINE LEARNING
+# AI 1 RANDOM FOREST
 # =====================
 
-def ml_engine(history):
+def ml_rf(history):
 
     X=[]
     y=[]
@@ -138,42 +122,82 @@ def ml_engine(history):
         X.append(seq+features(seq))
         y.append(history[i+window])
 
-    X=np.array(X)
-    y=np.array(y)
+    if len(X)<10:
+        return 0.5
+
+    model=RandomForestClassifier(300)
+
+    model.fit(X,y)
 
     last=history[-window:]
+
     last=np.array(last+features(last)).reshape(1,-1)
 
-    models=[
-
-    RandomForestClassifier(200),
-    ExtraTreesClassifier(200),
-    LogisticRegression(max_iter=500),
-    DecisionTreeClassifier(),
-    GaussianNB(),
-    xgb.XGBClassifier(),
-    lgb.LGBMClassifier()
-
-    ]
-
-    probs=[]
-
-    for m in models:
-
-        try:
-
-            m.fit(X,y)
-            probs.append(m.predict_proba(last)[0][1])
-        except:
-            pass
-
-    return np.mean(probs)
+    return model.predict_proba(last)[0][1]
 
 # =====================
-# MARKOV LEVEL 2
+# AI 2 GRADIENT BOOST
 # =====================
 
-def markov_engine(history):
+def ml_gb(history):
+
+    X=[]
+    y=[]
+
+    for i in range(len(history)-window):
+
+        seq=history[i:i+window]
+
+        X.append(seq+features(seq))
+        y.append(history[i+window])
+
+    if len(X)<10:
+        return 0.5
+
+    model=GradientBoostingClassifier()
+
+    model.fit(X,y)
+
+    last=history[-window:]
+
+    last=np.array(last+features(last)).reshape(1,-1)
+
+    return model.predict_proba(last)[0][1]
+
+# =====================
+# AI 3 LOGISTIC
+# =====================
+
+def ml_lr(history):
+
+    X=[]
+    y=[]
+
+    for i in range(len(history)-window):
+
+        seq=history[i:i+window]
+
+        X.append(seq+features(seq))
+        y.append(history[i+window])
+
+    if len(X)<10:
+        return 0.5
+
+    model=LogisticRegression(max_iter=500)
+
+    model.fit(X,y)
+
+    last=history[-window:]
+
+    last=np.array(last+features(last)).reshape(1,-1)
+
+    return model.predict_proba(last)[0][1]
+
+# =====================
+# AI 4 MARKOV 1
+# =====================
+
+def markov1(history):
 
     matrix=np.zeros((2,2))
 
@@ -189,25 +213,27 @@ def markov_engine(history):
     return row[1]/row.sum()
 
 # =====================
-# PATTERN MEMORY
+# AI 5 MARKOV 2
 # =====================
 
-def pattern_engine(history):
+def markov2(history):
 
-    seq=history[-6:]
+    if len(history)<3:
+        return 0.5
+
+    pair=history[-2:]
 
     count=0
     win=0
 
-    for i in range(len(history)-6):
+    for i in range(len(history)-2):
 
-        if history[i:i+6]==seq:
+        if history[i:i+2]==pair:
 
             count+=1
 
-            if i+6<len(history):
-
-                win+=history[i+6]
+            if history[i+2]==1:
+                win+=1
 
     if count==0:
         return 0.5
@@ -215,26 +241,61 @@ def pattern_engine(history):
     return win/count
 
 # =====================
-# MONTE CARLO
+# AI 6 PATTERN SCAN
+# =====================
+
+def pattern_engine(history):
+
+    wins=[]
+    weights=[]
+
+    for size in range(3,11):
+
+        seq=history[-size:]
+
+        count=0
+        win=0
+
+        for i in range(len(history)-size):
+
+            if history[i:i+size]==seq:
+
+                count+=1
+
+                if i+size<len(history):
+                    win+=history[i+size]
+
+        if count>0:
+
+            wins.append(win/count)
+            weights.append(count)
+
+    if len(wins)==0:
+        return 0.5
+
+    return np.average(wins,weights=weights)
+
+# =====================
+# AI 7 MONTE CARLO
 # =====================
 
 def monte_engine(history):
 
     p=sum(history)/len(history)
 
-    trials=2000
+    trials=20000
 
-    win=0
+    wins=0
 
     for _ in range(trials):
 
         if random.random()<p:
-            win+=1
+            wins+=1
 
-    return win/trials
+    return wins/trials
 
 # =====================
-# MARKET PROBABILITY
+# AI 8 MARKET TREND
 # =====================
 
 def market_engine(history):
@@ -244,46 +305,85 @@ def market_engine(history):
     return sum(last50)/len(last50)
 
 # =====================
-# AI ENGINE
+# AI 9 STREAK
+# =====================
+
+def streak_engine(history):
+
+    streak=1
+
+    for i in range(len(history)-1,0,-1):
+
+        if history[i]==history[i-1]:
+            streak+=1
+        else:
+            break
+
+    if streak>=5:
+
+        if history[-1]==1:
+            return 0.3
+        else:
+            return 0.7
+
+    return 0.5
+
+# =====================
+# AI 10 ENTROPY
+# =====================
+
+def entropy_engine(history):
+
+    p=sum(history)/len(history)
+
+    entropy=-(p*np.log2(p+1e-9)+(1-p)*np.log2(1-p+1e-9))
+
+    return p*(1-entropy)
+
+# =====================
+# AI PREDICT
 # =====================
 
 def ai_predict():
 
-    global prediction,confidence,dataset_size,status,progress
-
-    status="AI đang phân tích..."
-    progress=10
+    global prediction,confidence,status,dataset_size
 
     history=read_history()
 
     dataset_size=len(history)
 
     if dataset_size<window:
-
         status="Cần ít nhất 12 phiên"
         return
 
-    p1=ml_engine(history)
-    progress=30
+    status="RF AI ........ 10%"
 
-    p2=markov_engine(history)
-    progress=50
+    rf=ml_rf(history)
+    gb=ml_gb(history)
+    lr=ml_lr(history)
 
-    p3=pattern_engine(history)
-    progress=70
+    status="Markov AI .... 30%"
 
-    p4=monte_engine(history)
-    progress=85
+    mk1=markov1(history)
+    mk2=markov2(history)
 
-    p5=market_engine(history)
+    status="Pattern AI ... 55%"
 
-    weights=list(model_score.values())
+    pt=pattern_engine(history)
 
-    probs=[p1,p2,p3,p4,p5]
+    status="Monte Carlo .. 80%"
 
-    prob=np.average(probs,weights=weights)
+    mc=monte_engine(history)
 
-    progress=100
+    mk=market_engine(history)
+    st=streak_engine(history)
+    en=entropy_engine(history)
+
+    probs=[rf,gb,lr,mk1,mk2,pt,mc,mk,st,en]
+
+    status="Final AI ..... 100%"
+
+    prob=np.mean(probs)
 
     if prob>0.5:
 
@@ -295,10 +395,10 @@ def ai_predict():
         prediction="XỈU"
         confidence=round((1-prob)*100,2)
 
-    status="AI phân tích xong"
+    status="BOT đã phân tích xong"
 
 # =====================
-# COLLECTOR
+# DATA COLLECTOR
 # =====================
 
 def collector():
@@ -349,7 +449,7 @@ def home():
 
 <head>
 
-<title>AI GOD SUPREME</title>
+<title>AI SUPREME</title>
 
 <style>
 
@@ -366,16 +466,10 @@ font-size:70px;
 color:#00ffc8;
 }
 
-.bar{
-height:10px;
-background:#00ffc8;
-}
-
-.progress{
-height:10px;
-background:#1e293b;
-width:300px;
-margin:auto;
+.status{
+font-size:20px;
+margin-top:20px;
+color:#00ffaa;
 }
 
 </style>
@@ -384,7 +478,7 @@ margin:auto;
 
 <body>
 
-<h2>AI GOD SUPREME ENGINE</h2>
+<h2>AI SUPREME</h2>
 
 <div id="data">Loading...</div>
 
@@ -407,13 +501,13 @@ document.getElementById("data").innerHTML=
 
 "<p>Confidence: "+d.confidence+"%</p>"+
 
-"<p>"+d.status+"</p>"+
+"<p>Dataset: "+d.dataset+" phiên</p>"+
 
-"<div class='progress'><div class='bar' style='width:"+d.progress+"%'></div></div>"
+"<div class='status'>"+d.status+"</div>"
 
 }
 
-setInterval(load,3000)
+setInterval(load,2000)
 
 load()
 
@@ -437,8 +531,7 @@ def api():
         "prediction":prediction,
         "confidence":confidence,
         "dataset":dataset_size,
-        "status":status,
-        "progress":progress
+        "status":status
 
     })
 
