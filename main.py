@@ -33,7 +33,7 @@ prediction=None
 confidence=None
 dataset_size=0
 
-status="AI GOD ENGINE READY"
+status="AI GOD 2000 READY"
 progress=0
 
 last_period=None
@@ -41,9 +41,9 @@ last_period=None
 if not os.path.exists(history_file):
     open(history_file,"w").close()
 
-# =========================
-# NORMALIZE RESULT
-# =========================
+# =====================
+# NORMALIZE
+# =====================
 
 def normalize(r):
 
@@ -57,9 +57,9 @@ def normalize(r):
 
     return 0
 
-# =========================
-# READ HISTORY
-# =========================
+# =====================
+# HISTORY
+# =====================
 
 def read_history():
 
@@ -78,9 +78,6 @@ def read_history():
 
     return data
 
-# =========================
-# SAVE HISTORY
-# =========================
 
 def save_history(period,result,total):
 
@@ -99,9 +96,9 @@ def save_history(period,result,total):
     with open(history_file,"w") as f:
         f.writelines(lines)
 
-# =========================
-# FEATURE ENGINEERING
-# =========================
+# =====================
+# FEATURES
+# =====================
 
 def features(seq):
 
@@ -117,15 +114,15 @@ def features(seq):
 
     ]
 
-# =========================
-# STAT MODELS
-# =========================
+# =====================
+# 400 STAT MODELS
+# =====================
 
 def stat_models(history):
 
     probs=[]
 
-    for i in range(100):
+    for i in range(400):
 
         w=min(len(history),5+i)
 
@@ -133,9 +130,9 @@ def stat_models(history):
 
     return probs
 
-# =========================
-# PROB MODELS
-# =========================
+# =====================
+# 400 PROB MODELS
+# =====================
 
 def prob_models(history):
 
@@ -143,23 +140,23 @@ def prob_models(history):
 
     p=sum(history)/len(history)
 
-    for i in range(100):
+    for i in range(400):
 
         probs.append(abs(math.sin(p*(i+1))))
 
     return probs
 
-# =========================
-# PATTERN MODELS
-# =========================
+# =====================
+# 400 PATTERN MODELS
+# =====================
 
 def pattern_models(history):
 
     probs=[]
 
-    for i in range(100):
+    for i in range(400):
 
-        size=3+(i%6)
+        size=3+(i%10)
 
         pattern=history[-size:]
 
@@ -174,19 +171,19 @@ def pattern_models(history):
 
     return probs
 
-# =========================
-# MONTE CARLO MODELS
-# =========================
+# =====================
+# 400 MONTE CARLO
+# =====================
 
-def simulation_models(history):
+def monte_models(history):
 
     probs=[]
 
     p=sum(history)/len(history)
 
-    for i in range(100):
+    for i in range(400):
 
-        trials=100+i*5
+        trials=200+i*5
 
         s=0
 
@@ -199,9 +196,9 @@ def simulation_models(history):
 
     return probs
 
-# =========================
-# MACHINE LEARNING MODELS
-# =========================
+# =====================
+# 400 MACHINE LEARNING
+# =====================
 
 def ml_models(history):
 
@@ -222,7 +219,7 @@ def ml_models(history):
     last=history[-window:]
     last=np.array(last+features(last)).reshape(1,-1)
 
-    models=[
+    base_models=[
 
     RandomForestClassifier(100),
     ExtraTreesClassifier(100),
@@ -240,7 +237,9 @@ def ml_models(history):
 
     probs=[]
 
-    for m in models:
+    for i in range(400):
+
+        m=random.choice(base_models)
 
         try:
 
@@ -249,23 +248,20 @@ def ml_models(history):
             probs.append(m.predict_proba(last)[0][1])
 
         except:
-            pass
 
-    while len(probs)<100:
-
-        probs.append(random.random())
+            probs.append(random.random())
 
     return probs
 
-# =========================
-# AI PREDICTION ENGINE
-# =========================
+# =====================
+# AI ENGINE
+# =====================
 
 def ai_predict():
 
     global prediction,confidence,dataset_size,status,progress
 
-    status="AI đang phân tích dữ liệu..."
+    status="AI đang phân tích..."
     progress=0
 
     history=read_history()
@@ -274,7 +270,7 @@ def ai_predict():
 
     if dataset_size<window:
 
-        status="Cần ít nhất 12 phiên dữ liệu"
+        status="Cần tối thiểu 12 phiên dữ liệu"
         return
 
     probs=[]
@@ -284,7 +280,7 @@ def ai_predict():
         stat_models,
         prob_models,
         pattern_models,
-        simulation_models,
+        monte_models,
         ml_models
 
     ]
@@ -296,8 +292,6 @@ def ai_predict():
         probs+=result
 
         progress=int((i+1)/len(blocks)*100)
-
-        time.sleep(0.5)
 
     prob=np.mean(probs)
 
@@ -311,11 +305,11 @@ def ai_predict():
         prediction="XỈU"
         confidence=round((1-prob)*100,2)
 
-    status=f"AI phân tích xong | 500 Models"
+    status=f"AI phân tích xong | 2000 MODELS"
 
-# =========================
-# COLLECT API DATA
-# =========================
+# =====================
+# API COLLECTOR
+# =====================
 
 def collector():
 
@@ -347,13 +341,13 @@ def collector():
 
         except Exception as e:
 
-            print("API ERROR:",e)
+            print("API ERROR",e)
 
         time.sleep(3)
 
-# =========================
-# WEB PAGE
-# =========================
+# =====================
+# WEB
+# =====================
 
 @app.route("/")
 
@@ -365,53 +359,43 @@ def home():
 
 <head>
 
-<title>AI GOD 500 MODELS</title>
+<title>AI GOD 2000 MODELS</title>
 
 <style>
 
 body{
-
 background:#020617;
 color:white;
 font-family:Arial;
 text-align:center;
 margin-top:80px;
-
 }
 
 .box{
-
 background:#0f172a;
 padding:40px;
 border-radius:20px;
 width:420px;
 margin:auto;
 box-shadow:0 0 40px #00ffc8;
-
 }
 
 .result{
-
-font-size:65px;
+font-size:70px;
 color:#00ffc8;
 margin:20px;
-
 }
 
 .progress{
-
 height:10px;
 background:#1e293b;
 border-radius:10px;
 overflow:hidden;
-
 }
 
 .bar{
-
 height:10px;
 background:#00ffc8;
-
 }
 
 </style>
@@ -422,7 +406,7 @@ background:#00ffc8;
 
 <div class="box">
 
-<h2>AI GOD ENGINE 500 MODELS</h2>
+<h2>AI GOD ENGINE 2000 MODELS</h2>
 
 <div id="data">Loading...</div>
 
@@ -468,9 +452,9 @@ load()
 
 """
 
-# =========================
+# =====================
 # API
-# =========================
+# =====================
 
 @app.route("/api")
 
@@ -488,8 +472,6 @@ def api():
         "progress":progress
 
     })
-
-# =========================
 
 threading.Thread(target=collector,daemon=True).start()
 
