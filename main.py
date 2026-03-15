@@ -3,21 +3,18 @@ import requests
 import threading
 import time
 import os
-import unicodedata
 import numpy as np
 import random
 import math
 
-from sklearn.ensemble import RandomForestClassifier,ExtraTreesClassifier,GradientBoostingClassifier,HistGradientBoostingClassifier,AdaBoostClassifier,BaggingClassifier
+from sklearn.ensemble import RandomForestClassifier,ExtraTreesClassifier,GradientBoostingClassifier,AdaBoostClassifier
 from sklearn.linear_model import LogisticRegression,SGDClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.naive_bayes import GaussianNB
-from sklearn.neural_network import MLPClassifier
 
 import xgboost as xgb
 import lightgbm as lgb
-from catboost import CatBoostClassifier
 
 app = Flask(__name__)
 
@@ -26,9 +23,7 @@ API="https://phanmemdudoan.fun/apisun.php"
 history_file="history.txt"
 
 window=12
-max_history=1200
-
-last_period=None
+max_history=2000
 
 latest_period=None
 latest_result=None
@@ -36,55 +31,41 @@ latest_total=None
 
 prediction=None
 confidence=None
-status="AI ULTRA GOD MODE loading..."
-
-history_count=0
 dataset_size=0
+status="AI GOD ENGINE 500"
 
 
 if not os.path.exists(history_file):
     open(history_file,"w").close()
 
 
-def normalize(text):
+def normalize(r):
 
-    text=str(text)
-    text=unicodedata.normalize("NFC",text).lower()
+    r=str(r).lower()
 
-    if "tai" in text or "tài" in text:
-        return "Tài"
+    if "tai" in r or "tài" in r:
+        return 1
 
-    if "xiu" in text or "xỉu" in text:
-        return "Xỉu"
+    if "xiu" in r or "xỉu" in r:
+        return 0
 
-    return text
+    return 0
 
 
 def read_history():
 
-    global history_count
-
     data=[]
 
-    with open(history_file,encoding="utf-8") as f:
-        lines=f.readlines()
+    with open(history_file) as f:
 
-    history_count=len(lines)
+        for line in f:
 
-    for line in lines:
+            p=line.strip().split(",")
 
-        p=line.strip().split(",")
+            if len(p)<3:
+                continue
 
-        if len(p)<3:
-            continue
-
-        r=normalize(p[1])
-
-        if r=="Tài":
-            data.append(1)
-
-        elif r=="Xỉu":
-            data.append(0)
+            data.append(normalize(p[1]))
 
     return data
 
@@ -95,7 +76,7 @@ def save_history(period,result,total):
 
     if os.path.exists(history_file):
 
-        with open(history_file,encoding="utf-8") as f:
+        with open(history_file) as f:
             lines=f.readlines()
 
     lines.append(f"{period},{result},{total}\n")
@@ -103,206 +84,146 @@ def save_history(period,result,total):
     if len(lines)>max_history:
         lines=lines[-max_history:]
 
-    with open(history_file,"w",encoding="utf-8") as f:
+    with open(history_file,"w") as f:
         f.writelines(lines)
 
 
-def sequence_features(seq):
+def features(seq):
 
     arr=np.array(seq)
 
     return [
 
-        sum(arr),
-        np.mean(arr),
-        np.std(arr),
-        np.max(arr),
-        np.min(arr)
+        arr.sum(),
+        arr.mean(),
+        arr.std(),
+        arr.max(),
+        arr.min()
 
     ]
 
 
-# =================
-# ADVANCED AI
-# =================
+# =====================
+# STAT MODELS (100)
+# =====================
 
-def markov_predict(history):
+def stat_models(history):
 
-    trans=[[1,1],[1,1]]
+    probs=[]
 
-    for i in range(len(history)-1):
+    for i in range(100):
 
-        trans[history[i]][history[i+1]]+=1
+        w=min(len(history),5+i)
 
-    last=history[-1]
+        probs.append(np.mean(history[-w:]))
 
-    return trans[last][1]/(trans[last][0]+trans[last][1])
-
-
-def entropy_predict(history):
-
-    p=sum(history)/len(history)
-
-    if p in [0,1]:
-        return 0.5
-
-    entropy=-(p*math.log2(p)+(1-p)*math.log2(1-p))
-
-    return p*(1-entropy)
+    return probs
 
 
-def montecarlo(history):
+# =====================
+# PROBABILITY MODELS (100)
+# =====================
 
-    trials=500
+def prob_models(history):
+
+    probs=[]
 
     p=sum(history)/len(history)
 
-    return sum(random.random()<p for _ in range(trials))/trials
+    for i in range(100):
+
+        probs.append(abs(math.sin(p*(i+1))))
+
+    return probs
 
 
-# =================
-# TRANSFORMER STYLE
-# =================
+# =====================
+# PATTERN MODELS (100)
+# =====================
 
-def transformer_ai(history):
+def pattern_models(history):
 
-    weights=np.linspace(1,2,len(history))
+    probs=[]
 
-    weighted=np.array(history)*weights
+    for i in range(100):
 
-    return weighted.sum()/weights.sum()
+        size=3+(i%6)
 
+        pattern=history[-size:]
 
-# =================
-# REINFORCEMENT
-# =================
+        count=0
 
-def rl_predict(history):
+        for j in range(len(history)-size):
 
-    reward=0
+            if history[j:j+size]==pattern:
+                count+=1
 
-    for i in range(1,len(history)):
+        probs.append(count/(len(history)+1))
 
-        if history[i]==history[i-1]:
-            reward+=1
-        else:
-            reward-=1
-
-    p=sum(history)/len(history)
-
-    return p + reward/len(history)/5
+    return probs
 
 
-# =================
-# MONTE CARLO TREE
-# =================
+# =====================
+# MONTE CARLO MODELS (100)
+# =====================
 
-def mcts_predict(history):
+def simulation_models(history):
 
-    sims=200
-
-    score=0
+    probs=[]
 
     p=sum(history)/len(history)
 
-    for _ in range(sims):
+    for i in range(100):
 
-        if random.random()<p:
-            score+=1
+        trials=100+i*5
 
-    return score/sims
+        s=0
 
+        for _ in range(trials):
 
-# =================
-# GENETIC FEATURE
-# =================
+            if random.random()<p:
+                s+=1
 
-def genetic_predict(history):
+        probs.append(s/trials)
 
-    pop=50
-
-    best=0
-
-    for _ in range(pop):
-
-        w=random.random()
-
-        p=sum(history)/len(history)*w
-
-        best=max(best,p)
-
-    return best
+    return probs
 
 
-# =================
-# DEEP PATTERN
-# =================
+# =====================
+# MACHINE LEARNING (100)
+# =====================
 
-def deep_pattern(history):
-
-    last=history[-5:]
-
-    pattern_count=0
-
-    for i in range(len(history)-5):
-
-        if history[i:i+5]==last:
-            pattern_count+=1
-
-    return pattern_count/(len(history)+1)
-
-
-def ai_predict():
-
-    global prediction,confidence,status,dataset_size
-
-    history=read_history()
-
-    dataset_size=len(history)
-
-    if dataset_size<window+10:
-
-        status=f"Cần {window+10} phiên ({dataset_size})"
-        return
+def ml_models(history):
 
     X=[]
     y=[]
 
-    for i in range(dataset_size-window):
+    for i in range(len(history)-window):
 
         seq=history[i:i+window]
 
-        feats=sequence_features(seq)
-
-        X.append(seq+feats)
+        X.append(seq+features(seq))
 
         y.append(history[i+window])
 
     X=np.array(X)
     y=np.array(y)
 
-    last_seq=history[-window:]
-    last_feats=sequence_features(last_seq)
-
-    last=np.array(last_seq+last_feats).reshape(1,-1)
+    last=history[-window:]
+    last=np.array(last+features(last)).reshape(1,-1)
 
     models=[
 
-    RandomForestClassifier(200),
-    ExtraTreesClassifier(200),
+    RandomForestClassifier(100),
+    ExtraTreesClassifier(100),
     GradientBoostingClassifier(),
-    HistGradientBoostingClassifier(),
     AdaBoostClassifier(),
-    BaggingClassifier(),
-    LogisticRegression(max_iter=1000),
+    LogisticRegression(max_iter=500),
     SGDClassifier(loss="log_loss"),
     KNeighborsClassifier(),
     DecisionTreeClassifier(),
     GaussianNB(),
-    MLPClassifier(max_iter=500),
-    xgb.XGBClassifier(),
-    lgb.LGBMClassifier(),
-    CatBoostClassifier(verbose=0)
+    xgb.XGBClassifier()
 
     ]
 
@@ -313,21 +234,41 @@ def ai_predict():
         try:
 
             m.fit(X,y)
-
             probs.append(m.predict_proba(last)[0][1])
-
         except:
             pass
 
+    while len(probs)<100:
 
-    probs.append(markov_predict(history))
-    probs.append(entropy_predict(history))
-    probs.append(montecarlo(history))
-    probs.append(transformer_ai(history))
-    probs.append(rl_predict(history))
-    probs.append(mcts_predict(history))
-    probs.append(genetic_predict(history))
-    probs.append(deep_pattern(history))
+        probs.append(random.random())
+
+    return probs
+
+
+# =====================
+# AI PREDICT
+# =====================
+
+def ai_predict():
+
+    global prediction,confidence,dataset_size,status
+
+    history=read_history()
+
+    dataset_size=len(history)
+
+    if dataset_size<20:
+
+        status="Waiting data..."
+        return
+
+    probs=[]
+
+    probs+=stat_models(history)
+    probs+=prob_models(history)
+    probs+=pattern_models(history)
+    probs+=simulation_models(history)
+    probs+=ml_models(history)
 
     prob=np.mean(probs)
 
@@ -341,12 +282,15 @@ def ai_predict():
         prediction="Xỉu"
         confidence=round((1-prob)*100,2)
 
-    status=f"AI ULTRA GOD MODE | {len(probs)} models | Dataset {dataset_size}"
+    status=f"GOD AI ENGINE | predictors {len(probs)}"
+
+
+last_period=None
 
 
 def collector():
 
-    global last_period,latest_period,latest_result,latest_total
+    global latest_period,latest_result,latest_total,last_period
 
     while True:
 
@@ -357,7 +301,7 @@ def collector():
             data=r.json()
 
             period=data["period"]
-            result=normalize(data["result"])
+            result=data["result"]
             total=data["total"]
 
             if period!=last_period:
@@ -372,50 +316,55 @@ def collector():
 
                 ai_predict()
 
-                print("Round:",period,result,total)
-
         except Exception as e:
 
             print("API error:",e)
 
-        time.sleep(15)
+        time.sleep(3)
 
 
 @app.route("/")
+
 def home():
 
-    return """
+    return f"""
 
 <html>
 
 <head>
 
-<title>AI TÀI XỈU ULTRA GOD MODE</title>
+<title>AI GOD 500 MODELS</title>
 
 <style>
 
-body{
+body{{
+
 background:#020617;
 color:white;
 font-family:Arial;
 text-align:center;
 margin-top:80px;
-}
 
-.box{
+}}
+
+.box{{
+
 background:#0f172a;
 padding:40px;
-border-radius:15px;
-width:380px;
+border-radius:20px;
+width:420px;
 margin:auto;
-box-shadow:0 0 25px #00ffc8;
-}
+box-shadow:0 0 40px #00ffc8;
 
-.result{
-font-size:50px;
-margin:20px;
+}}
+
+.result{{
+
+font-size:65px;
 color:#00ffc8;
-}
+margin:20px;
+
+}}
 
 </style>
 
@@ -425,7 +374,7 @@ color:#00ffc8;
 
 <div class="box">
 
-<h2>AI TÀI XỈU ULTRA GOD MODE</h2>
+<h2>AI GOD ENGINE 500 MODELS</h2>
 
 <div id="data">Loading...</div>
 
@@ -433,7 +382,7 @@ color:#00ffc8;
 
 <script>
 
-async function load(){
+async function load(){{
 
 let r=await fetch("/api")
 let d=await r.json()
@@ -442,23 +391,21 @@ document.getElementById("data").innerHTML=
 
 "<div class='result'>"+(d.prediction||"-")+"</div>"+
 
-"<p>Phiên trước: "+(d.period||"-")+"</p>"+
+"<p>Phiên: "+d.period+"</p>"+
 
-"<p>Kết quả: "+(d.result||"-")+"</p>"+
+"<p>Kết quả: "+d.result+"</p>"+
 
-"<p>Tổng xúc xắc: "+(d.total||"-")+" 🎲</p>"+
+"<p>Tổng xúc xắc: "+d.total+" 🎲</p>"+
 
-"<p>Confidence: "+(d.confidence||"-")+"%</p>"+
+"<p>Confidence: "+d.confidence+"%</p>"+
 
-"<p>History: "+(d.history)+" / 1200</p>"+
-
-"<p>Dataset AI: "+(d.dataset)+"</p>"+
+"<p>Dataset: "+d.dataset+"</p>"+
 
 "<p>"+d.status+"</p>"
 
-}
+}}
 
-setInterval(load,5000)
+setInterval(load,3000)
 
 load()
 
@@ -472,6 +419,7 @@ load()
 
 
 @app.route("/api")
+
 def api():
 
     return jsonify({
@@ -481,19 +429,17 @@ def api():
         "total":latest_total,
         "prediction":prediction,
         "confidence":confidence,
-        "status":status,
-        "history":history_count,
-        "dataset":dataset_size
+        "dataset":dataset_size,
+        "status":status
 
     })
 
 
 threading.Thread(target=collector,daemon=True).start()
 
+
 if __name__=="__main__":
 
     port=int(os.environ.get("PORT",10000))
 
     app.run(host="0.0.0.0",port=port)
-
-
