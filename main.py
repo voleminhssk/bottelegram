@@ -14,8 +14,6 @@ from sklearn.tree import DecisionTreeClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.naive_bayes import GaussianNB
 from sklearn.neural_network import MLPClassifier
-from sklearn.calibration import CalibratedClassifierCV
-from sklearn.ensemble import StackingClassifier,VotingClassifier
 
 import xgboost as xgb
 import lightgbm as lgb
@@ -124,10 +122,6 @@ def sequence_features(seq):
     ]
 
 
-# =====================
-# MARKOV CHAIN AI
-# =====================
-
 def markov_predict(history):
 
     trans=[[1,1],[1,1]]
@@ -146,10 +140,6 @@ def markov_predict(history):
     return prob
 
 
-# =====================
-# ENTROPY AI
-# =====================
-
 def entropy_predict(history):
 
     p=sum(history)/len(history)
@@ -161,10 +151,6 @@ def entropy_predict(history):
 
     return p*(1-entropy)
 
-
-# =====================
-# MONTE CARLO
-# =====================
 
 def montecarlo(history):
 
@@ -219,27 +205,27 @@ def ai_predict():
 
     models=[
 
-    ("rf",RandomForestClassifier(200)),
-    ("et",ExtraTreesClassifier(200)),
-    ("gb",GradientBoostingClassifier()),
-    ("hgb",HistGradientBoostingClassifier()),
-    ("ada",AdaBoostClassifier()),
-    ("bag",BaggingClassifier()),
-    ("lr",LogisticRegression(max_iter=1000)),
-    ("sgd",SGDClassifier(loss="log_loss")),
-    ("knn",KNeighborsClassifier()),
-    ("dt",DecisionTreeClassifier()),
-    ("nb",GaussianNB()),
-    ("mlp",MLPClassifier(max_iter=500)),
-    ("xgb",xgb.XGBClassifier()),
-    ("lgb",lgb.LGBMClassifier()),
-    ("cat",CatBoostClassifier(verbose=0))
+    RandomForestClassifier(200),
+    ExtraTreesClassifier(200),
+    GradientBoostingClassifier(),
+    HistGradientBoostingClassifier(),
+    AdaBoostClassifier(),
+    BaggingClassifier(),
+    LogisticRegression(max_iter=1000),
+    SGDClassifier(loss="log_loss"),
+    KNeighborsClassifier(),
+    DecisionTreeClassifier(),
+    GaussianNB(),
+    MLPClassifier(max_iter=500),
+    xgb.XGBClassifier(),
+    lgb.LGBMClassifier(),
+    CatBoostClassifier(verbose=0)
 
     ]
 
     probs=[]
 
-    for name,m in models:
+    for m in models:
 
         try:
 
@@ -251,8 +237,6 @@ def ai_predict():
 
         except:
             pass
-
-    # Probability AI
 
     probs.append(markov_predict(history))
     probs.append(entropy_predict(history))
@@ -310,6 +294,101 @@ def collector():
         time.sleep(15)
 
 
+@app.route("/")
+def home():
+
+    return """
+
+<html>
+
+<head>
+
+<title>AI Tài Xỉu GOD MODE</title>
+
+<style>
+
+body{
+background:#0f172a;
+color:white;
+font-family:Arial;
+text-align:center;
+margin-top:80px;
+}
+
+.box{
+background:#1e293b;
+padding:35px;
+border-radius:15px;
+width:360px;
+margin:auto;
+box-shadow:0 0 20px rgba(0,255,200,0.3);
+}
+
+.result{
+font-size:45px;
+margin:20px;
+color:#00ffc8;
+}
+
+.info{
+margin:6px;
+font-size:15px;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="box">
+
+<h2>AI TÀI XỈU GOD MODE</h2>
+
+<div id="data">Loading...</div>
+
+</div>
+
+<script>
+
+async function load(){
+
+let r=await fetch("/api")
+let d=await r.json()
+
+document.getElementById("data").innerHTML=
+
+"<div class='result'>"+(d.prediction||"-")+"</div>"+
+
+"<div class='info'>Phiên trước: "+(d.period||"-")+"</div>"+
+
+"<div class='info'>Kết quả: "+(d.result||"-")+"</div>"+
+
+"<div class='info'>Tổng xúc xắc: "+(d.total||"-")+" 🎲</div>"+
+
+"<div class='info'>Confidence: "+(d.confidence||"-")+"%</div>"+
+
+"<div class='info'>History: "+(d.history)+" / 1200</div>"+
+
+"<div class='info'>Dataset AI: "+(d.dataset)+"</div>"+
+
+"<div class='info'>"+d.status+"</div>"
+
+}
+
+setInterval(load,5000)
+
+load()
+
+</script>
+
+</body>
+
+</html>
+
+"""
+
+
 @app.route("/api")
 def api():
 
@@ -334,3 +413,4 @@ if __name__=="__main__":
     port=int(os.environ.get("PORT",10000))
 
     app.run(host="0.0.0.0",port=port)
+
