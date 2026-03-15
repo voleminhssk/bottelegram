@@ -32,25 +32,34 @@ latest_total=None
 prediction=None
 confidence=None
 dataset_size=0
-status="AI GOD ENGINE 500"
 
+status="AI GOD ENGINE READY"
+progress=0
+
+last_period=None
 
 if not os.path.exists(history_file):
     open(history_file,"w").close()
 
+# =========================
+# NORMALIZE RESULT
+# =========================
 
 def normalize(r):
 
     r=str(r).lower()
 
-    if "tai" in r or "tài" in r:
+    if "tai" in r:
         return 1
 
-    if "xiu" in r or "xỉu" in r:
+    if "xiu" in r:
         return 0
 
     return 0
 
+# =========================
+# READ HISTORY
+# =========================
 
 def read_history():
 
@@ -69,6 +78,9 @@ def read_history():
 
     return data
 
+# =========================
+# SAVE HISTORY
+# =========================
 
 def save_history(period,result,total):
 
@@ -87,6 +99,9 @@ def save_history(period,result,total):
     with open(history_file,"w") as f:
         f.writelines(lines)
 
+# =========================
+# FEATURE ENGINEERING
+# =========================
 
 def features(seq):
 
@@ -102,10 +117,9 @@ def features(seq):
 
     ]
 
-
-# =====================
-# STAT MODELS (100)
-# =====================
+# =========================
+# STAT MODELS
+# =========================
 
 def stat_models(history):
 
@@ -119,10 +133,9 @@ def stat_models(history):
 
     return probs
 
-
-# =====================
-# PROBABILITY MODELS (100)
-# =====================
+# =========================
+# PROB MODELS
+# =========================
 
 def prob_models(history):
 
@@ -136,10 +149,9 @@ def prob_models(history):
 
     return probs
 
-
-# =====================
-# PATTERN MODELS (100)
-# =====================
+# =========================
+# PATTERN MODELS
+# =========================
 
 def pattern_models(history):
 
@@ -162,10 +174,9 @@ def pattern_models(history):
 
     return probs
 
-
-# =====================
-# MONTE CARLO MODELS (100)
-# =====================
+# =========================
+# MONTE CARLO MODELS
+# =========================
 
 def simulation_models(history):
 
@@ -188,10 +199,9 @@ def simulation_models(history):
 
     return probs
 
-
-# =====================
-# MACHINE LEARNING (100)
-# =====================
+# =========================
+# MACHINE LEARNING MODELS
+# =========================
 
 def ml_models(history):
 
@@ -223,7 +233,8 @@ def ml_models(history):
     KNeighborsClassifier(),
     DecisionTreeClassifier(),
     GaussianNB(),
-    xgb.XGBClassifier()
+    xgb.XGBClassifier(),
+    lgb.LGBMClassifier()
 
     ]
 
@@ -234,7 +245,9 @@ def ml_models(history):
         try:
 
             m.fit(X,y)
+
             probs.append(m.predict_proba(last)[0][1])
+
         except:
             pass
 
@@ -244,49 +257,65 @@ def ml_models(history):
 
     return probs
 
-
-# =====================
-# AI PREDICT
-# =====================
+# =========================
+# AI PREDICTION ENGINE
+# =========================
 
 def ai_predict():
 
-    global prediction,confidence,dataset_size,status
+    global prediction,confidence,dataset_size,status,progress
+
+    status="AI đang phân tích dữ liệu..."
+    progress=0
 
     history=read_history()
 
     dataset_size=len(history)
 
-    if dataset_size<20:
+    if dataset_size<window:
 
-        status="Waiting data..."
+        status="Cần ít nhất 12 phiên dữ liệu"
         return
 
     probs=[]
 
-    probs+=stat_models(history)
-    probs+=prob_models(history)
-    probs+=pattern_models(history)
-    probs+=simulation_models(history)
-    probs+=ml_models(history)
+    blocks=[
+
+        stat_models,
+        prob_models,
+        pattern_models,
+        simulation_models,
+        ml_models
+
+    ]
+
+    for i,b in enumerate(blocks):
+
+        result=b(history)
+
+        probs+=result
+
+        progress=int((i+1)/len(blocks)*100)
+
+        time.sleep(0.5)
 
     prob=np.mean(probs)
 
     if prob>0.5:
 
-        prediction="Tài"
+        prediction="TÀI"
         confidence=round(prob*100,2)
 
     else:
 
-        prediction="Xỉu"
+        prediction="XỈU"
         confidence=round((1-prob)*100,2)
 
-    status=f"GOD AI ENGINE | predictors {len(probs)}"
+    status=f"AI phân tích xong | 500 Models"
 
-
-last_period=None
-
+# =========================
+# COLLECT API DATA
+# =========================
 
 def collector():
 
@@ -318,16 +347,19 @@ def collector():
 
         except Exception as e:
 
-            print("API error:",e)
+            print("API ERROR:",e)
 
         time.sleep(3)
 
+# =========================
+# WEB PAGE
+# =========================
 
 @app.route("/")
 
 def home():
 
-    return f"""
+    return """
 
 <html>
 
@@ -337,7 +369,7 @@ def home():
 
 <style>
 
-body{{
+body{
 
 background:#020617;
 color:white;
@@ -345,9 +377,9 @@ font-family:Arial;
 text-align:center;
 margin-top:80px;
 
-}}
+}
 
-.box{{
+.box{
 
 background:#0f172a;
 padding:40px;
@@ -356,15 +388,31 @@ width:420px;
 margin:auto;
 box-shadow:0 0 40px #00ffc8;
 
-}}
+}
 
-.result{{
+.result{
 
 font-size:65px;
 color:#00ffc8;
 margin:20px;
 
-}}
+}
+
+.progress{
+
+height:10px;
+background:#1e293b;
+border-radius:10px;
+overflow:hidden;
+
+}
+
+.bar{
+
+height:10px;
+background:#00ffc8;
+
+}
 
 </style>
 
@@ -382,9 +430,10 @@ margin:20px;
 
 <script>
 
-async function load(){{
+async function load(){
 
 let r=await fetch("/api")
+
 let d=await r.json()
 
 document.getElementById("data").innerHTML=
@@ -401,9 +450,11 @@ document.getElementById("data").innerHTML=
 
 "<p>Dataset: "+d.dataset+"</p>"+
 
-"<p>"+d.status+"</p>"
+"<p>"+d.status+"</p>"+
 
-}}
+"<div class='progress'><div class='bar' style='width:"+d.progress+"%'></div></div>"
+
+}
 
 setInterval(load,3000)
 
@@ -417,6 +468,9 @@ load()
 
 """
 
+# =========================
+# API
+# =========================
 
 @app.route("/api")
 
@@ -430,13 +484,14 @@ def api():
         "prediction":prediction,
         "confidence":confidence,
         "dataset":dataset_size,
-        "status":status
+        "status":status,
+        "progress":progress
 
     })
 
+# =========================
 
 threading.Thread(target=collector,daemon=True).start()
-
 
 if __name__=="__main__":
 
