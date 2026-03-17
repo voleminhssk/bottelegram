@@ -1,358 +1,258 @@
-from flask import Flask, jsonify
-import numpy as np
-import random
-import time
-import threading
+from flask import Flask, send_file, jsonify
+import requests
 import os
-
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, ExtraTreesClassifier
-from sklearn.linear_model import LogisticRegression, SGDClassifier
-from sklearn.naive_bayes import GaussianNB
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.tree import DecisionTreeClassifier
+import threading
+import time
 
 app = Flask(__name__)
 
-history_file="history.txt"
-max_history=2000
-window=12
+API_URL = "https://apisunhpt.onrender.com/sunlon"
 
-prediction=None
-confidence=None
-status="Starting..."
+DATA_FOLDER = "data"
+MAX_LINES = 300
+MAX_NUMBERS_PER_LINE = 30
+MAX_FILES = 5
 
-# -------------------------
-# DATA
-# -------------------------
+running = False
+full_flag = False
 
-def normalize(x):
-    x=str(x).lower()
-    if "tai" in x or x=="1":
-        return 1
-    if "xiu" in x or x=="0":
-        return 0
-    return 0
+# ================= INIT =================
+def init_files():
+    if not os.path.exists(DATA_FOLDER):
+        os.makedirs(DATA_FOLDER)
 
-def read_history():
+    for i in range(1, MAX_FILES + 1):
+        file_path = f"{DATA_FOLDER}/data_{i}.txt"
+        if not os.path.exists(file_path):
+            open(file_path, "w").close()
 
-    data=[]
+init_files()
 
-    if not os.path.exists(history_file):
-        return data
+# ================= FILE =================
+def get_current_file():
+    init_files()  # đảm bảo luôn đủ file
 
-    with open(history_file) as f:
-        for line in f:
-            p=line.strip().split(",")
-            if len(p)<2:
-                continue
-            data.append(normalize(p[1]))
+    for i in range(1, MAX_FILES + 1):
+        path = f"{DATA_FOLDER}/data_{i}.txt"
+        with open(path, "r") as f:
+            if len(f.readlines()) < MAX_LINES:
+                return path
+    return None
 
-    return data[-max_history:]
+def save_number(number):
+    global full_flag
 
-# -------------------------
-# FEATURES
-# -------------------------
+    file_path = get_current_file()
+    if file_path is None:
+        full_flag = True
+        return "FULL"
 
-def features(seq):
+    with open(file_path, "r") as f:
+        lines = f.readlines()
 
-    return [
-        sum(seq),
-        np.mean(seq),
-        np.std(seq),
-        sum(seq[-3:]),
-        sum(seq[-5:]),
-        sum(seq[-7:])
-    ]
+    if not lines:
+        lines = [""]
 
-def build_dataset(history):
+    last_line = lines[-1].strip()
 
-    X=[]
-    y=[]
+    if last_line.endswith("],"):
+        last_line = last_line[:-2]
+    elif last_line.endswith("]"):
+        last_line = last_line[:-1]
 
-    if len(history)<window+1:
-        return None,None
+    numbers = last_line.replace("[", "").split(",")
+    numbers = [n for n in numbers if n != ""]
 
-    for i in range(len(history)-window):
+    if len(numbers) < MAX_NUMBERS_PER_LINE:
+        numbers.append(str(number))
+        lines[-1] = "[" + ",".join(numbers) + "],\n"
+    else:
+        lines.append(f"[{number}],\n")
 
-        seq=history[i:i+window]
+    with open(file_path, "w") as f:
+        f.writelines(lines)
 
-        X.append(seq+features(seq))
-        y.append(history[i+window])
+    return "OK"
 
-    return np.array(X),np.array(y)
+# ================= AUTO =================
+def auto_fetch():
+    global running
 
-def last_feature(history):
-
-    seq=history[-window:]
-
-    return np.array([seq+features(seq)])
-
-# -------------------------
-# MODELS
-# -------------------------
-
-rf=RandomForestClassifier(n_estimators=120)
-gb=GradientBoostingClassifier()
-et=ExtraTreesClassifier()
-lr=LogisticRegression()
-sgd=SGDClassifier(loss="log_loss")
-nb=GaussianNB()
-knn=KNeighborsClassifier()
-dt=DecisionTreeClassifier()
-
-models=[rf,gb,et,lr,sgd,nb,knn,dt]
-
-models_ready=False
-
-def train_models(history):
-
-    global models_ready
-
-    X,y=build_dataset(history)
-
-    if X is None:
-        return
-
-    for m in models:
-        try:
-            m.fit(X,y)
-        except:
-            pass
-
-    models_ready=True
-
-# -------------------------
-# ENGINES
-# -------------------------
-
-def model_engine(model,history):
-
-    if not models_ready:
-        return 0.5
-
-    try:
-        return model.predict_proba(last_feature(history))[0][1]
-    except:
-        return random.random()
-
-def markov(history):
-
-    m=np.zeros((2,2))
-
-    for i in range(len(history)-1):
-        m[history[i]][history[i+1]]+=1
-
-    row=m[history[-1]]
-
-    if row.sum()==0:
-        return 0.5
-
-    return row[1]/row.sum()
-
-def pattern(history):
-
-    seq=history[-4:]
-
-    win=0
-    count=0
-
-    for i in range(len(history)-4):
-        if history[i:i+4]==seq:
-            count+=1
-            win+=history[i+4]
-
-    if count==0:
-        return 0.5
-
-    return win/count
-
-def monte(history):
-
-    p=sum(history)/len(history)
-
-    win=0
-
-    for _ in range(5000):
-        if random.random()<p:
-            win+=1
-
-    return win/5000
-
-def entropy(history):
-
-    p=sum(history)/len(history)
-
-    return p*(1-p)
-
-def streak(history):
-
-    s=1
-
-    for i in range(len(history)-1,0,-1):
-        if history[i]==history[i-1]:
-            s+=1
-        else:
+    while running:
+        if full_flag:
             break
 
-    if s>=4:
-        return 0.3 if history[-1]==1 else 0.7
+        init_files()
 
-    return 0.5
+        try:
+            res = requests.get(API_URL).json()
+            tong = res.get("tong")
 
-def random_engine():
-    return random.random()
+            status = save_number(tong)
 
-# -------------------------
-# AI PREDICT
-# -------------------------
+            if status == "FULL":
+                running = False
 
-def ai_predict():
+        except Exception as e:
+            print("Lỗi:", e)
 
-    global prediction,confidence,status
+        time.sleep(3)
 
-    history=read_history()
-
-    if len(history)<window:
-        status="Need more data"
-        return
-
-    status="Running 50 AI engines..."
-
-    engines=[]
-
-    # ML engines
-    for m in models:
-        engines.append(model_engine(m,history))
-
-    # statistical
-    engines.append(markov(history))
-    engines.append(pattern(history))
-    engines.append(monte(history))
-    engines.append(entropy(history))
-    engines.append(streak(history))
-
-    # random engines
-    while len(engines)<50:
-        engines.append(random_engine())
-
-    prob=np.mean(engines)
-
-    if prob>0.5:
-        prediction="TÀI"
-        confidence=round(prob*100,2)
-    else:
-        prediction="XỈU"
-        confidence=round((1-prob)*100,2)
-
-    status="BOT đã phân tích xong"
-
-# -------------------------
-# LOOP
-# -------------------------
-
-def loop():
-
-    while True:
-
-        history=read_history()
-
-        train_models(history)
-
-        ai_predict()
-
-        time.sleep(4)
-
-# -------------------------
-# WEB
-# -------------------------
-
+# ================= WEB =================
 @app.route("/")
+def index():
+    files = os.listdir(DATA_FOLDER)
 
-def home():
+    html = f"""
+    <html>
+    <head>
+    <title>API LOGGER PRO MAX</title>
+    <style>
+    body {{
+        background:#0f172a;
+        color:white;
+        font-family:Arial;
+        text-align:center;
+    }}
+    .box {{
+        background:#1e293b;
+        margin:10px auto;
+        padding:15px;
+        border-radius:12px;
+        width:90%;
+        max-width:600px;
+    }}
+    button {{
+        padding:10px;
+        margin:5px;
+        border:none;
+        border-radius:8px;
+        cursor:pointer;
+        font-weight:bold;
+    }}
+    .start{{background:#22c55e}}
+    .stop{{background:#ef4444}}
+    .reset{{background:#f59e0b}}
+    .view{{background:#3b82f6}}
+    .download{{background:#8b5cf6}}
+    textarea {{
+        width:100%;
+        height:150px;
+        background:#020617;
+        color:#22c55e;
+        border-radius:8px;
+        padding:10px;
+    }}
+    </style>
+    </head>
 
-    return """
+    <body>
 
-<html>
+    <h2>🚀 API LOGGER PRO MAX</h2>
 
-<head>
+    <div class="box">
+        <button class="start" onclick="start()">▶ Start</button>
+        <button class="stop" onclick="stop()">⛔ Stop</button>
+        <button class="reset" onclick="reset()">🔄 Reset</button>
+        <h3 id="status">Đang chờ...</h3>
+    </div>
+    """
 
-<title>AI GOD MODE</title>
+    for f in files:
+        html += f"""
+        <div class="box">
+            <h3>{f}</h3>
+            <button class="view" onclick="viewFile('{f}')">👁 Xem</button>
+            <a href="/download/{f}">
+                <button class="download">📥 Download</button>
+            </a>
+            <textarea id="content_{f}"></textarea>
+        </div>
+        """
 
-<style>
+    html += """
+    <script>
 
-body{
-background:#0a0a0a;
-color:#00ffcc;
-font-family:Arial;
-text-align:center
-}
+    function start(){ fetch('/start') }
+    function stop(){ fetch('/stop') }
 
-.panel{
-background:#111;
-padding:20px;
-border-radius:10px;
-width:400px;
-margin:auto
-}
+    function reset(){
+        if(confirm("Reset toàn bộ dữ liệu?")){
+            fetch('/reset').then(()=>location.reload())
+        }
+    }
 
-.result{
-font-size:70px;
-color:#00ff99
-}
+    function viewFile(name){
+        fetch('/view/'+name)
+        .then(res=>res.text())
+        .then(data=>{
+            document.getElementById("content_"+name).value=data
+        })
+    }
 
-</style>
+    setInterval(()=>{
+        fetch('/status').then(r=>r.json()).then(d=>{
+            document.getElementById("status").innerHTML=d.msg
+        })
+    },2000)
 
-</head>
+    </script>
 
-<body>
+    </body>
+    </html>
+    """
 
-<h2>AI GOD MODE</h2>
+    return html
 
-<div class="panel">
+@app.route("/view/<filename>")
+def view_file(filename):
+    with open(f"{DATA_FOLDER}/{filename}", "r") as f:
+        return f.read()
 
-<div id="result">Loading...</div>
+@app.route("/start")
+def start():
+    global running, full_flag
 
-</div>
+    if full_flag:
+        return jsonify({"msg":"FULL - cần reset"})
 
-<script>
+    if not running:
+        running = True
+        threading.Thread(target=auto_fetch).start()
 
-async function load(){
+    return jsonify({"msg":"RUNNING"})
 
-let r=await fetch("/api")
-let d=await r.json()
+@app.route("/stop")
+def stop():
+    global running
+    running = False
+    return jsonify({"msg":"STOPPED"})
 
-document.getElementById("result").innerHTML=
-`<div class=result>${d.prediction}</div>
-<p>Confidence ${d.confidence}%</p>
-<p>${d.status}</p>`
+@app.route("/reset")
+def reset():
+    global running, full_flag
 
-}
+    running = False
+    full_flag = False
 
-setInterval(load,2000)
+    for i in range(1, MAX_FILES + 1):
+        open(f"{DATA_FOLDER}/data_{i}.txt", "w").close()
 
-load()
+    return jsonify({"msg":"RESET DONE"})
 
-</script>
+@app.route("/status")
+def status():
+    if full_flag:
+        return jsonify({"msg":"⚠️ FULL 5 FILE - BẤM RESET"})
+    elif running:
+        return jsonify({"msg":"▶ ĐANG CHẠY"})
+    else:
+        return jsonify({"msg":"⛔ ĐÃ DỪNG"})
 
-</body>
+@app.route("/download/<filename>")
+def download(filename):
+    return send_file(f"{DATA_FOLDER}/{filename}", as_attachment=True)
 
-</html>
-
-"""
-
-@app.route("/api")
-
-def api():
-
-    return jsonify({
-
-        "prediction":prediction,
-        "confidence":confidence,
-        "status":status
-
-    })
-
-threading.Thread(target=loop,daemon=True).start()
-
-if __name__=="__main__":
-    app.run(port=10000)
+# ================= RUN =================
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
