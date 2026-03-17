@@ -15,7 +15,8 @@ MAX_FILES = 5
 
 running = False
 full_flag = False
-last_phien = None  # 🧠 chống trùng
+last_phien = None
+thread = None  # 🔥 chỉ 1 thread
 
 # ================= INIT =================
 def init_files():
@@ -79,9 +80,16 @@ def save_number(number):
 def auto_fetch():
     global running, last_phien
 
-    while running:
+    print("🔥 BOT START 24/24")
+
+    while True:  # 🔥 chạy vô hạn
+        if not running:
+            time.sleep(1)
+            continue
+
         if full_flag:
-            break
+            time.sleep(2)
+            continue
 
         init_files()
 
@@ -91,18 +99,17 @@ def auto_fetch():
             phien = res.get("phien")
             tong = res.get("tong")
 
-            # 🔥 CHỐNG TRÙNG
             if last_phien is not None and phien <= last_phien:
-                print("Bỏ qua phiên cũ:", phien)
+                print("⏩ Bỏ qua:", phien)
             else:
-                print("Lưu phiên mới:", phien)
+                print("✅ Lưu:", phien, "→", tong)
                 save_number(tong)
                 last_phien = phien
 
         except Exception as e:
-            print("Lỗi:", e)
+            print("❌ Lỗi:", e)
 
-        time.sleep(60)  # ⏱ 70s
+        time.sleep(60)
 
 # ================= WEB =================
 @app.route("/")
@@ -112,7 +119,7 @@ def index():
     html = f"""
     <html>
     <head>
-    <title>API LOGGER PRO MAX</title>
+    <title>API LOGGER 24/24</title>
     <style>
     body {{
         background:#0f172a;
@@ -154,7 +161,7 @@ def index():
 
     <body>
 
-    <h2>🚀 API LOGGER PRO MAX (ANTI TRÙNG)</h2>
+    <h2>🚀 BOT API 24/24 (ANTI TRÙNG)</h2>
 
     <div class="box">
         <button class="start" onclick="start()">▶ Start</button>
@@ -208,29 +215,25 @@ def index():
 
     return html
 
-@app.route("/view/<filename>")
-def view_file(filename):
-    with open(f"{DATA_FOLDER}/{filename}", "r") as f:
-        return f.read()
-
 @app.route("/start")
 def start():
-    global running, full_flag
+    global running, thread
 
-    if full_flag:
-        return jsonify({"msg":"FULL - cần reset"})
+    running = True
 
-    if not running:
-        running = True
-        threading.Thread(target=auto_fetch).start()
+    # 🔥 chỉ tạo thread 1 lần duy nhất
+    if thread is None:
+        thread = threading.Thread(target=auto_fetch)
+        thread.daemon = True
+        thread.start()
 
-    return jsonify({"msg":"RUNNING"})
+    return jsonify({"msg": "RUNNING 24/24"})
 
 @app.route("/stop")
 def stop():
     global running
     running = False
-    return jsonify({"msg":"STOPPED"})
+    return jsonify({"msg": "STOPPED"})
 
 @app.route("/reset")
 def reset():
@@ -243,16 +246,21 @@ def reset():
     for i in range(1, MAX_FILES + 1):
         open(f"{DATA_FOLDER}/data_{i}.txt", "w").close()
 
-    return jsonify({"msg":"RESET DONE"})
+    return jsonify({"msg": "RESET DONE"})
 
 @app.route("/status")
 def status():
     if full_flag:
-        return jsonify({"msg":"⚠️ FULL 5 FILE - RESET"})
+        return jsonify({"msg": "⚠️ FULL - RESET"})
     elif running:
-        return jsonify({"msg":"▶ ĐANG CHẠY"})
+        return jsonify({"msg": "▶ RUNNING 24/24"})
     else:
-        return jsonify({"msg":"⛔ ĐÃ DỪNG"})
+        return jsonify({"msg": "⛔ STOPPED"})
+
+@app.route("/view/<filename>")
+def view_file(filename):
+    with open(f"{DATA_FOLDER}/{filename}", "r") as f:
+        return f.read()
 
 @app.route("/download/<filename>")
 def download(filename):
