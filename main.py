@@ -6,7 +6,7 @@ import time
 
 app = Flask(__name__)
 
-API_URL = "https://apisunhpt.onrender.com/sunlon"
+API_URL = "https://phanmemdudoan.fun/apisun.php?t=%201773472883162"
 
 DATA_FOLDER = "data"
 MAX_LINES = 300
@@ -86,9 +86,9 @@ def auto_fetch():
 
         try:
             res = requests.get(API_URL).json()
-            tong = res.get("tong")
+            tong = res.get("total")
 
-            status = save_number(tong)
+            status = save_number(total)
 
             if status == "FULL":
                 running = False
