@@ -6,7 +6,7 @@ import time
 
 app = Flask(__name__)
 
-API_URL = "https://phanmemdudoan.fun/apisun.php?t=%201773472883162"
+API_URL = "https://apisunhpt.onrender.com/sunlon"
 
 DATA_FOLDER = "data"
 MAX_LINES = 300
@@ -15,6 +15,7 @@ MAX_FILES = 5
 
 running = False
 full_flag = False
+last_phien = None  # 🧠 chống trùng
 
 # ================= INIT =================
 def init_files():
@@ -30,7 +31,7 @@ init_files()
 
 # ================= FILE =================
 def get_current_file():
-    init_files()  # đảm bảo luôn đủ file
+    init_files()
 
     for i in range(1, MAX_FILES + 1):
         path = f"{DATA_FOLDER}/data_{i}.txt"
@@ -76,7 +77,7 @@ def save_number(number):
 
 # ================= AUTO =================
 def auto_fetch():
-    global running
+    global running, last_phien
 
     while running:
         if full_flag:
@@ -86,17 +87,22 @@ def auto_fetch():
 
         try:
             res = requests.get(API_URL).json()
-            tong = res.get("total")
 
-            status = save_number(total)
+            phien = res.get("phien")
+            tong = res.get("tong")
 
-            if status == "FULL":
-                running = False
+            # 🔥 CHỐNG TRÙNG
+            if last_phien is not None and phien <= last_phien:
+                print("Bỏ qua phiên cũ:", phien)
+            else:
+                print("Lưu phiên mới:", phien)
+                save_number(tong)
+                last_phien = phien
 
         except Exception as e:
             print("Lỗi:", e)
 
-        time.sleep(3)
+        time.sleep(60)  # ⏱ 70s
 
 # ================= WEB =================
 @app.route("/")
@@ -148,7 +154,7 @@ def index():
 
     <body>
 
-    <h2>🚀 API LOGGER PRO MAX</h2>
+    <h2>🚀 API LOGGER PRO MAX (ANTI TRÙNG)</h2>
 
     <div class="box">
         <button class="start" onclick="start()">▶ Start</button>
@@ -172,7 +178,6 @@ def index():
 
     html += """
     <script>
-
     function start(){ fetch('/start') }
     function stop(){ fetch('/stop') }
 
@@ -195,7 +200,6 @@ def index():
             document.getElementById("status").innerHTML=d.msg
         })
     },2000)
-
     </script>
 
     </body>
@@ -230,10 +234,11 @@ def stop():
 
 @app.route("/reset")
 def reset():
-    global running, full_flag
+    global running, full_flag, last_phien
 
     running = False
     full_flag = False
+    last_phien = None
 
     for i in range(1, MAX_FILES + 1):
         open(f"{DATA_FOLDER}/data_{i}.txt", "w").close()
@@ -243,7 +248,7 @@ def reset():
 @app.route("/status")
 def status():
     if full_flag:
-        return jsonify({"msg":"⚠️ FULL 5 FILE - BẤM RESET"})
+        return jsonify({"msg":"⚠️ FULL 5 FILE - RESET"})
     elif running:
         return jsonify({"msg":"▶ ĐANG CHẠY"})
     else:
