@@ -102,7 +102,7 @@ def auto_fetch():
         except Exception as e:
             print("Lỗi:", e)
 
-        time.sleep(60)  # ⏱ 60s
+        time.sleep(50)  # ⏱ 60s
 
 # ================= WEB =================
 @app.route("/")
