@@ -15,7 +15,8 @@ MAX_FILES = 5
 
 running = False
 full_flag = False
-last_phien = None  # 🧠 chống trùng
+last_phien = None
+last_tong = None  # 🔥 chống trùng sâu
 
 # ================= INIT =================
 def init_files():
@@ -31,8 +32,6 @@ init_files()
 
 # ================= FILE =================
 def get_current_file():
-    init_files()
-
     for i in range(1, MAX_FILES + 1):
         path = f"{DATA_FOLDER}/data_{i}.txt"
         with open(path, "r") as f:
@@ -75,34 +74,44 @@ def save_number(number):
 
     return "OK"
 
-# ================= AUTO =================
+# ================= AUTO FETCH =================
 def auto_fetch():
-    global running, last_phien
+    global running, last_phien, last_tong
 
     while running:
         if full_flag:
             break
 
-        init_files()
-
         try:
-            res = requests.get(API_URL).json()
+            res = requests.get(API_URL, timeout=10).json()
 
-            phien = res.get("phien")
+            phien = int(res.get("phien", 0))
             tong = res.get("tong")
 
-            # 🔥 CHỐNG TRÙNG
-            if last_phien is not None and phien <= last_phien:
-                print("Bỏ qua phiên cũ:", phien)
-            else:
-                print("Lưu phiên mới:", phien)
+            if phien == 0 or tong is None:
+                print("❌ Dữ liệu lỗi")
+                time.sleep(5)
+                continue
+
+            if last_phien is None:
+                last_phien = phien
+                last_tong = tong
+                print("🟡 INIT:", phien)
+
+            elif phien > last_phien and tong != last_tong:
+                print(f"✅ NEW: {phien} | {tong}")
                 save_number(tong)
                 last_phien = phien
+                last_tong = tong
+
+            else:
+                print(f"⏳ WAIT: {phien}")
 
         except Exception as e:
-            print("Lỗi:", e)
+            print("❌ API ERROR:", e)
 
-        time.sleep(50)  # ⏱ 60s
+        # 🔥 Sync chuẩn 60s
+        time.sleep(60 - time.time() % 60)
 
 # ================= WEB =================
 @app.route("/")
@@ -112,7 +121,7 @@ def index():
     html = f"""
     <html>
     <head>
-    <title>API LOGGER PRO MAX</title>
+    <title>LOGGER PRO MAX</title>
     <style>
     body {{
         background:#0f172a;
@@ -153,14 +162,13 @@ def index():
     </head>
 
     <body>
-
-    <h2>🚀 API LOGGER PRO MAX (ANTI TRÙNG)</h2>
+    <h2>🚀 LOGGER PRO MAX (ANTI TRÙNG)</h2>
 
     <div class="box">
         <button class="start" onclick="start()">▶ Start</button>
         <button class="stop" onclick="stop()">⛔ Stop</button>
         <button class="reset" onclick="reset()">🔄 Reset</button>
-        <h3 id="status">Đang chờ...</h3>
+        <h3 id="status">Loading...</h3>
     </div>
     """
 
@@ -196,7 +204,9 @@ def index():
     }
 
     setInterval(()=>{
-        fetch('/status').then(r=>r.json()).then(d=>{
+        fetch('/status')
+        .then(r=>r.json())
+        .then(d=>{
             document.getElementById("status").innerHTML=d.msg
         })
     },2000)
@@ -218,41 +228,42 @@ def start():
     global running, full_flag
 
     if full_flag:
-        return jsonify({"msg":"FULL - cần reset"})
+        return jsonify({"msg":"⚠️ FULL - RESET"})
 
     if not running:
         running = True
-        threading.Thread(target=auto_fetch).start()
+        threading.Thread(target=auto_fetch, daemon=True).start()
 
-    return jsonify({"msg":"RUNNING"})
+    return jsonify({"msg":"▶ RUNNING"})
 
 @app.route("/stop")
 def stop():
     global running
     running = False
-    return jsonify({"msg":"STOPPED"})
+    return jsonify({"msg":"⛔ STOPPED"})
 
 @app.route("/reset")
 def reset():
-    global running, full_flag, last_phien
+    global running, full_flag, last_phien, last_tong
 
     running = False
     full_flag = False
     last_phien = None
+    last_tong = None
 
     for i in range(1, MAX_FILES + 1):
         open(f"{DATA_FOLDER}/data_{i}.txt", "w").close()
 
-    return jsonify({"msg":"RESET DONE"})
+    return jsonify({"msg":"🔄 RESET DONE"})
 
 @app.route("/status")
 def status():
     if full_flag:
-        return jsonify({"msg":"⚠️ FULL 5 FILE - RESET"})
+        return jsonify({"msg": f"⚠️ FULL | Last: {last_phien}"})
     elif running:
-        return jsonify({"msg":"▶ ĐANG CHẠY"})
+        return jsonify({"msg": f"▶ RUNNING | Phiên: {last_phien}"})
     else:
-        return jsonify({"msg":"⛔ ĐÃ DỪNG"})
+        return jsonify({"msg": f"⛔ STOPPED | Phiên: {last_phien}"})
 
 @app.route("/download/<filename>")
 def download(filename):
