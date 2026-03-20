@@ -16,7 +16,7 @@ MAX_FILES = 5
 running = False
 full_flag = False
 last_phien = None
-last_tong = None  # 🔥 chống trùng sâu
+last_tong = None
 
 # ================= INIT =================
 def init_files():
@@ -55,6 +55,13 @@ def save_number(number):
 
     last_line = lines[-1].strip()
 
+    # 🔥 chống trùng số cuối
+    if last_line:
+        clean = last_line.replace("[", "").replace("]", "").replace(",", " ").split()
+        if clean and clean[-1] == str(number):
+            print("⚠️ TRÙNG - BỎ QUA")
+            return "SKIP"
+
     if last_line.endswith("],"):
         last_line = last_line[:-2]
     elif last_line.endswith("]"):
@@ -78,8 +85,11 @@ def save_number(number):
 def auto_fetch():
     global running, last_phien, last_tong
 
+    print("🚀 AUTO FETCH START")
+
     while running:
         if full_flag:
+            print("⚠️ FULL DATA - STOP")
             break
 
         try:
@@ -89,19 +99,24 @@ def auto_fetch():
             tong = res.get("tong")
 
             if phien == 0 or tong is None:
-                print("❌ Dữ liệu lỗi")
+                print("❌ API ERROR DATA")
                 time.sleep(5)
                 continue
 
             if last_phien is None:
                 last_phien = phien
                 last_tong = tong
-                print("🟡 INIT:", phien)
+                print(f"🟡 INIT: {phien} | {tong}")
 
-            elif phien > last_phien and tong != last_tong:
+            elif phien > last_phien:
                 print(f"✅ NEW: {phien} | {tong}")
                 save_number(tong)
                 last_phien = phien
+                last_tong = tong
+
+            elif phien == last_phien and tong != last_tong:
+                print(f"♻️ UPDATE: {phien} | {tong}")
+                save_number(tong)
                 last_tong = tong
 
             else:
@@ -110,8 +125,8 @@ def auto_fetch():
         except Exception as e:
             print("❌ API ERROR:", e)
 
-        # 🔥 Sync chuẩn 60s
-        time.sleep(60 - time.time() % 60)
+        # 🔥 check mỗi 30s
+        time.sleep(30)
 
 # ================= WEB =================
 @app.route("/")
@@ -162,7 +177,7 @@ def index():
     </head>
 
     <body>
-    <h2>🚀 LOGGER PRO MAX (ANTI TRÙNG)</h2>
+    <h2>🚀 LOGGER PRO MAX (30s - AUTO)</h2>
 
     <div class="box">
         <button class="start" onclick="start()">▶ Start</button>
