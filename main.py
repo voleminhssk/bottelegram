@@ -1,8 +1,8 @@
-# ============================================
+# =========================================================
 # AI FOOTBALL ANALYZER PRO
-# Flask + HTML + CSS + JS + SQLite
-# Stable Prediction + 24H Cache
-# ============================================
+# FULL SOURCE CODE
+# Flask + SQLite + Stable AI + 24H Cache
+# =========================================================
 
 # INSTALL:
 # pip install flask requests beautifulsoup4 lxml gunicorn
@@ -23,12 +23,12 @@ BASE_URL = "https://bongda24h.vn"
 
 CACHE_TIME = 86400
 
-# ============================================
-# SQLITE
-# ============================================
+# =========================================================
+# DATABASE
+# =========================================================
 
 conn = sqlite3.connect(
-    "predictions.db",
+    "football_ai.db",
     check_same_thread=False
 )
 
@@ -61,9 +61,9 @@ CREATE TABLE IF NOT EXISTS predictions (
 
 conn.commit()
 
-# ============================================
-# STABLE RANDOM
-# ============================================
+# =========================================================
+# STABLE AI RANDOM
+# =========================================================
 
 def stable_random(seed_text):
 
@@ -72,13 +72,11 @@ def stable_random(seed_text):
         16
     )
 
-    rng = random.Random(seed)
+    return random.Random(seed)
 
-    return rng
-
-# ============================================
+# =========================================================
 # POISSON
-# ============================================
+# =========================================================
 
 def poisson(avg, goals):
 
@@ -87,9 +85,93 @@ def poisson(avg, goals):
         * math.exp(-avg)
     ) / math.factorial(goals)
 
-# ============================================
+# =========================================================
+# RECENT FORM
+# =========================================================
+
+def generate_recent_form(team):
+
+    rng = stable_random(team)
+
+    form = []
+
+    results = ["W", "D", "L"]
+
+    for _ in range(5):
+
+        form.append(
+            results[rng.randint(0, 2)]
+        )
+
+    return form
+
+# =========================================================
+# TEAM RANK
+# =========================================================
+
+def get_team_rank(team):
+
+    rng = stable_random(team + "_rank")
+
+    return rng.randint(1, 20)
+
+# =========================================================
+# RECENT MATCHES
+# =========================================================
+
+def recent_matches(team):
+
+    rng = stable_random(team + "_recent")
+
+    clubs = [
+
+        "Liverpool",
+        "Barcelona",
+        "Arsenal",
+        "Chelsea",
+        "Bayern",
+        "Juventus",
+        "PSG",
+        "Milan"
+
+    ]
+
+    data = []
+
+    for _ in range(5):
+
+        opponent = clubs[
+            rng.randint(0, len(clubs)-1)
+        ]
+
+        home_goals = rng.randint(0, 4)
+        away_goals = rng.randint(0, 4)
+
+        if home_goals > away_goals:
+            result = "W"
+
+        elif home_goals < away_goals:
+            result = "L"
+
+        else:
+            result = "D"
+
+        data.append({
+
+            "opponent": opponent,
+
+            "score":
+                f"{home_goals}-{away_goals}",
+
+            "result": result
+
+        })
+
+    return data
+
+# =========================================================
 # MONTE CARLO
-# ============================================
+# =========================================================
 
 def monte_carlo(home_power, away_power, rng):
 
@@ -124,29 +206,9 @@ def monte_carlo(home_power, away_power, rng):
 
     }
 
-# ============================================
-# RECENT FORM
-# ============================================
-
-def recent_form(team):
-
-    rng = stable_random(team)
-
-    forms = []
-
-    results = ["W", "D", "L"]
-
-    for _ in range(5):
-
-        forms.append(
-            results[rng.randint(0, 2)]
-        )
-
-    return forms
-
-# ============================================
+# =========================================================
 # AI ENGINE
-# ============================================
+# =========================================================
 
 def generate_prediction(match_id, home, away):
 
@@ -161,22 +223,26 @@ def generate_prediction(match_id, home, away):
     home_def = rng.randint(70, 94)
     away_def = rng.randint(65, 90)
 
-    home_rank = rng.randint(1, 6)
-    away_rank = rng.randint(1, 10)
-
     home_form_score = rng.randint(70, 95)
     away_form_score = rng.randint(65, 90)
 
-    home_h2h = rng.randint(60, 90)
-    away_h2h = rng.randint(55, 85)
+    home_h2h = rng.randint(65, 92)
+    away_h2h = rng.randint(60, 88)
+
+    home_rank = get_team_rank(home)
+    away_rank = get_team_rank(away)
+
+    home_rank_score = 100 - (home_rank * 3)
+    away_rank_score = 100 - (away_rank * 3)
 
     home_power = (
 
         home_attack * 0.25 +
         home_mid * 0.20 +
         home_def * 0.20 +
-        home_form_score * 0.20 +
-        home_h2h * 0.15
+        home_form_score * 0.15 +
+        home_h2h * 0.10 +
+        home_rank_score * 0.10
 
     )
 
@@ -185,8 +251,9 @@ def generate_prediction(match_id, home, away):
         away_attack * 0.25 +
         away_mid * 0.20 +
         away_def * 0.20 +
-        away_form_score * 0.20 +
-        away_h2h * 0.15
+        away_form_score * 0.15 +
+        away_h2h * 0.10 +
+        away_rank_score * 0.10
 
     )
 
@@ -221,13 +288,23 @@ def generate_prediction(match_id, home, away):
             poisson(away_goal_avg, x)
     )
 
-    score_prediction = (
-        f"{predicted_home_goals}"
-        f"-"
-        f"{predicted_away_goals}"
-    )
-
     return {
+
+        "winner": winner,
+
+        "confidence": confidence,
+
+        "score_prediction":
+            f"{predicted_home_goals}-{predicted_away_goals}",
+
+        "home_win":
+            simulations["home_win"],
+
+        "draw":
+            simulations["draw"],
+
+        "away_win":
+            simulations["away_win"],
 
         "home_attack": home_attack,
         "away_attack": away_attack,
@@ -241,33 +318,23 @@ def generate_prediction(match_id, home, away):
         "home_rank": home_rank,
         "away_rank": away_rank,
 
-        "winner": winner,
-
-        "confidence": confidence,
-
-        "score_prediction":
-            score_prediction,
-
-        "home_win":
-            simulations["home_win"],
-
-        "draw":
-            simulations["draw"],
-
-        "away_win":
-            simulations["away_win"],
-
         "home_form":
-            recent_form(home),
+            generate_recent_form(home),
 
         "away_form":
-            recent_form(away)
+            generate_recent_form(away),
+
+        "home_recent":
+            recent_matches(home),
+
+        "away_recent":
+            recent_matches(away)
 
     }
 
-# ============================================
+# =========================================================
 # CACHE
-# ============================================
+# =========================================================
 
 def get_prediction(match_id, home, away):
 
@@ -344,9 +411,9 @@ def get_prediction(match_id, home, away):
 
     return prediction
 
-# ============================================
+# =========================================================
 # HOME
-# ============================================
+# =========================================================
 
 @app.route("/")
 def home():
@@ -364,7 +431,6 @@ def home():
     for a in soup.find_all("a"):
 
         href = a.get("href")
-        text = a.text.strip()
 
         if not href:
             continue
@@ -388,7 +454,11 @@ def home():
         if len(teams) < 2:
             continue
 
-        home_team = teams[0].replace("-", " ").title()
+        home_team = (
+            teams[0]
+            .replace("-", " ")
+            .title()
+        )
 
         away_team = (
             teams[1]
@@ -410,18 +480,18 @@ def home():
 
             "url": full_url,
 
-            "prediction": prediction,
+            "time": "Updating",
 
-            "time": "19:30",
+            "league": "Football League",
 
-            "league": "Football League"
+            "prediction": prediction
 
         })
 
-    page = """
+    return render_template_string("""
 
 <!DOCTYPE html>
-<html lang="vi">
+<html>
 
 <head>
 
@@ -443,13 +513,9 @@ body{
 .header{
 
     text-align:center;
-
     padding:25px;
-
     font-size:40px;
-
     color:#00ffd5;
-
     font-weight:bold;
 
 }
@@ -477,51 +543,14 @@ body{
 
 .match{
 
-    font-size:30px;
-
+    font-size:28px;
     font-weight:bold;
 
 }
 
-.league{
+.rank{
 
     color:#00ffd5;
-
-}
-
-.confidence-bar{
-
-    width:100%;
-
-    background:#1f2937;
-
-    border-radius:20px;
-
-    overflow:hidden;
-
-    margin-top:15px;
-
-}
-
-.fill{
-
-    height:24px;
-
-    background:#00ffd5;
-
-    text-align:center;
-
-    color:black;
-
-    font-weight:bold;
-
-    line-height:24px;
-
-}
-
-.form{
-
-    margin-top:10px;
 
 }
 
@@ -532,35 +561,49 @@ body{
     width:35px;
     height:35px;
 
-    text-align:center;
-
     line-height:35px;
+
+    text-align:center;
 
     border-radius:50%;
 
     margin-right:5px;
 
+}
+
+.W{background:#00ff95;color:black;}
+.D{background:#ffcc00;color:black;}
+.L{background:#ff4d4d;}
+
+.bar{
+
+    width:100%;
+    background:#1f2937;
+
+    border-radius:20px;
+
+    overflow:hidden;
+
+}
+
+.fill{
+
+    height:24px;
+
+    background:
+    linear-gradient(
+        90deg,
+        #00ff95,
+        #00ffd5
+    );
+
+    text-align:center;
+
+    color:black;
+
+    line-height:24px;
+
     font-weight:bold;
-
-}
-
-.W{
-
-    background:#00ff95;
-    color:black;
-
-}
-
-.D{
-
-    background:#ffcc00;
-    color:black;
-
-}
-
-.L{
-
-    background:#ff4d4d;
 
 }
 
@@ -570,13 +613,13 @@ body{
 
     margin-top:20px;
 
+    padding:12px 20px;
+
     background:#00ffd5;
 
     color:black;
 
     text-decoration:none;
-
-    padding:12px 20px;
 
     border-radius:12px;
 
@@ -602,17 +645,15 @@ body{
 
 <div class="card">
 
-<div class="league">
-
-🏆 {{match.league}}
-
-</div>
-
 <h2 class="match">
 
 {{match.home}}
+(#{{match.prediction.home_rank}})
+
 VS
+
 {{match.away}}
+(#{{match.prediction.away_rank}})
 
 </h2>
 
@@ -622,7 +663,7 @@ VS
 
 <h3>
 
-🤖 AI:
+🏆 AI:
 {{match.prediction.winner}}
 
 </h3>
@@ -637,7 +678,7 @@ DRAW {{match.prediction.draw}}%
 
 </p>
 
-<div class="confidence-bar">
+<div class="bar">
 
 <div class="fill"
 
@@ -651,7 +692,7 @@ width:{{match.prediction.confidence}}%
 
 </div>
 
-<h4>🔥 FORM</h4>
+<h3>🔥 FORM</h3>
 
 <div class="form">
 
@@ -693,18 +734,14 @@ XEM PHÂN TÍCH
 </div>
 
 </body>
+
 </html>
 
-"""
+    """, matches=matches[:20])
 
-    return render_template_string(
-        page,
-        matches=matches[:20]
-    )
-
-# ============================================
+# =========================================================
 # ANALYZE
-# ============================================
+# =========================================================
 
 @app.route("/analyze")
 def analyze():
@@ -730,108 +767,197 @@ def analyze():
         .title()
     )
 
-    prediction = get_prediction(
+    prediction = generate_prediction(
         slug,
         home_team,
         away_team
     )
 
-    return f"""
+    return render_template_string("""
 
-    <html>
+<html>
 
-    <head>
+<head>
 
-    <title>AI Analysis</title>
+<title>AI Analysis</title>
 
-    <style>
+<style>
 
-    body{{
+body{
 
-        background:#050816;
-        color:white;
-        font-family:Arial;
-        padding:30px;
+    background:#050816;
+    color:white;
+    font-family:Arial;
+    padding:30px;
 
-    }}
+}
 
-    .card{{
+.card{
 
-        background:#111827;
-        padding:30px;
-        border-radius:20px;
+    background:#111827;
+    padding:30px;
+    border-radius:20px;
 
-    }}
+}
 
-    </style>
+.form span{
 
-    </head>
+    display:inline-block;
 
-    <body>
+    width:35px;
+    height:35px;
 
-    <div class='card'>
+    line-height:35px;
 
-    <h1>
+    text-align:center;
 
-    {home_team}
-    VS
-    {away_team}
+    border-radius:50%;
 
-    </h1>
+    margin-right:5px;
 
-    <h2>
+}
 
-    🏆 AI Prediction:
-    {prediction["winner"]}
+.W{background:#00ff95;color:black;}
+.D{background:#ffcc00;color:black;}
+.L{background:#ff4d4d;}
 
-    </h2>
+</style>
 
-    <h2>
+</head>
 
-    ⚽ Score:
-    {prediction["score_prediction"]}
+<body>
 
-    </h2>
+<div class="card">
 
-    <h3>
+<h1>
 
-    🤖 Confidence:
-    {prediction["confidence"]}%
+{{home}}
+VS
+{{away}}
 
-    </h3>
+</h1>
 
-    <p>
+<h2>
 
-    {home_team} Win:
-    {prediction["home_win"]}%
+🏆 AI:
+{{prediction.winner}}
 
-    </p>
+</h2>
 
-    <p>
+<h2>
 
-    Draw:
-    {prediction["draw"]}%
+⚽ Score:
+{{prediction.score_prediction}}
 
-    </p>
+</h2>
 
-    <p>
+<h3>
 
-    {away_team} Win:
-    {prediction["away_win"]}%
+🤖 Confidence:
+{{prediction.confidence}}%
 
-    </p>
+</h3>
 
-    </div>
+<hr>
 
-    </body>
+<h2>📊 BXH</h2>
 
-    </html>
+<p>
 
-    """
+{{home}}:
+#{{prediction.home_rank}}
 
-# ============================================
+</p>
+
+<p>
+
+{{away}}:
+#{{prediction.away_rank}}
+
+</p>
+
+<hr>
+
+<h2>🔥 FORM</h2>
+
+<div class="form">
+
+{% for r in prediction.home_form %}
+
+<span class="{{r}}">
+{{r}}
+</span>
+
+{% endfor %}
+
+</div>
+
+<div class="form">
+
+{% for r in prediction.away_form %}
+
+<span class="{{r}}">
+{{r}}
+</span>
+
+{% endfor %}
+
+</div>
+
+<hr>
+
+<h2>⚽ RECENT MATCHES</h2>
+
+<h3>{{home}}</h3>
+
+{% for m in prediction.home_recent %}
+
+<p>
+
+{{m.opponent}}
+-
+{{m.score}}
+-
+{{m.result}}
+
+</p>
+
+{% endfor %}
+
+<h3>{{away}}</h3>
+
+{% for m in prediction.away_recent %}
+
+<p>
+
+{{m.opponent}}
+-
+{{m.score}}
+-
+{{m.result}}
+
+</p>
+
+{% endfor %}
+
+</div>
+
+</body>
+
+</html>
+
+    """,
+
+    home=home_team,
+    away=away_team,
+
+    prediction=prediction
+
+    )
+
+# =========================================================
 # RUN
-# ============================================
+# =========================================================
 
 if __name__ == "__main__":
 
