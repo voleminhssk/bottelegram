@@ -1,7 +1,4 @@
 flask
 requests
-numpy
-scikit-learn
-xgboost
-lightgbm
-catboost
+beautifulsoup4
+lxml
