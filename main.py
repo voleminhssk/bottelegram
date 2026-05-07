@@ -1,89 +1,181 @@
-# ================================
-# AI FOOTBALL ANALYZER FULL APP
-# Python + HTML + CSS + JS
-# ================================
+# ============================================
+# AI FOOTBALL ANALYZER PRO
+# Flask + HTML + CSS + JS + SQLite
+# Stable Prediction + 24H Cache
+# ============================================
 
-# CÀI:
-# pip install flask requests beautifulsoup4 lxml
+# INSTALL:
+# pip install flask requests beautifulsoup4 lxml gunicorn
 
 from flask import Flask, render_template_string, request
 import requests
 from bs4 import BeautifulSoup
+import hashlib
 import random
 import math
+import sqlite3
+import time
+import os
 
 app = Flask(__name__)
 
 BASE_URL = "https://bongda24h.vn"
 
-# ==========================================
-# AI ENGINE
-# ==========================================
+CACHE_TIME = 86400
+
+# ============================================
+# SQLITE
+# ============================================
+
+conn = sqlite3.connect(
+    "predictions.db",
+    check_same_thread=False
+)
+
+cursor = conn.cursor()
+
+cursor.execute("""
+
+CREATE TABLE IF NOT EXISTS predictions (
+
+    match_id TEXT PRIMARY KEY,
+
+    home TEXT,
+    away TEXT,
+
+    winner TEXT,
+
+    confidence REAL,
+
+    score_prediction TEXT,
+
+    home_win REAL,
+    draw REAL,
+    away_win REAL,
+
+    created_at INTEGER
+
+)
+
+""")
+
+conn.commit()
+
+# ============================================
+# STABLE RANDOM
+# ============================================
+
+def stable_random(seed_text):
+
+    seed = int(
+        hashlib.md5(seed_text.encode()).hexdigest(),
+        16
+    )
+
+    rng = random.Random(seed)
+
+    return rng
+
+# ============================================
+# POISSON
+# ============================================
 
 def poisson(avg, goals):
 
-    return ((avg ** goals) * math.exp(-avg)) / math.factorial(goals)
+    return (
+        (avg ** goals)
+        * math.exp(-avg)
+    ) / math.factorial(goals)
 
-def monte_carlo(home_power, away_power, simulations=10000):
+# ============================================
+# MONTE CARLO
+# ============================================
 
-    home_wins = 0
-    away_wins = 0
-    draws = 0
+def monte_carlo(home_power, away_power, rng):
 
-    for _ in range(simulations):
+    home_win = 0
+    away_win = 0
+    draw = 0
 
-        home = random.gauss(home_power, 10)
-        away = random.gauss(away_power, 10)
+    for _ in range(5000):
 
-        if home > away:
-            home_wins += 1
+        h = rng.gauss(home_power, 8)
+        a = rng.gauss(away_power, 8)
 
-        elif away > home:
-            away_wins += 1
+        if h > a:
+            home_win += 1
+
+        elif a > h:
+            away_win += 1
 
         else:
-            draws += 1
+            draw += 1
 
     return {
 
         "home_win":
-            round(home_wins / simulations * 100, 1),
+            round(home_win / 5000 * 100, 1),
 
         "away_win":
-            round(away_wins / simulations * 100, 1),
+            round(away_win / 5000 * 100, 1),
 
         "draw":
-            round(draws / simulations * 100, 1)
+            round(draw / 5000 * 100, 1)
 
     }
 
-def analyze_match(home, away):
+# ============================================
+# RECENT FORM
+# ============================================
 
-    # ==========================
-    # FIFA STYLE AI STATS
-    # ==========================
+def recent_form(team):
 
-    home_attack = random.randint(70, 95)
-    away_attack = random.randint(65, 92)
+    rng = stable_random(team)
 
-    home_mid = random.randint(70, 94)
-    away_mid = random.randint(65, 91)
+    forms = []
 
-    home_def = random.randint(68, 93)
-    away_def = random.randint(60, 90)
+    results = ["W", "D", "L"]
 
-    home_form = random.randint(65, 95)
-    away_form = random.randint(60, 92)
+    for _ in range(5):
 
-    home_h2h = random.randint(50, 90)
-    away_h2h = random.randint(45, 85)
+        forms.append(
+            results[rng.randint(0, 2)]
+        )
+
+    return forms
+
+# ============================================
+# AI ENGINE
+# ============================================
+
+def generate_prediction(match_id, home, away):
+
+    rng = stable_random(match_id)
+
+    home_attack = rng.randint(70, 95)
+    away_attack = rng.randint(65, 92)
+
+    home_mid = rng.randint(70, 94)
+    away_mid = rng.randint(65, 90)
+
+    home_def = rng.randint(70, 94)
+    away_def = rng.randint(65, 90)
+
+    home_rank = rng.randint(1, 6)
+    away_rank = rng.randint(1, 10)
+
+    home_form_score = rng.randint(70, 95)
+    away_form_score = rng.randint(65, 90)
+
+    home_h2h = rng.randint(60, 90)
+    away_h2h = rng.randint(55, 85)
 
     home_power = (
 
         home_attack * 0.25 +
         home_mid * 0.20 +
         home_def * 0.20 +
-        home_form * 0.20 +
+        home_form_score * 0.20 +
         home_h2h * 0.15
 
     )
@@ -93,14 +185,15 @@ def analyze_match(home, away):
         away_attack * 0.25 +
         away_mid * 0.20 +
         away_def * 0.20 +
-        away_form * 0.20 +
+        away_form_score * 0.20 +
         away_h2h * 0.15
 
     )
 
     simulations = monte_carlo(
         home_power,
-        away_power
+        away_power,
+        rng
     )
 
     if home_power > away_power:
@@ -108,29 +201,33 @@ def analyze_match(home, away):
     else:
         winner = away
 
-    home_goal_avg = home_attack / 40
-    away_goal_avg = away_attack / 42
-
-    predicted_home_goals = max(
-        range(6),
-        key=lambda x: poisson(home_goal_avg, x)
-    )
-
-    predicted_away_goals = max(
-        range(6),
-        key=lambda x: poisson(away_goal_avg, x)
-    )
-
     confidence = round(
         abs(home_power - away_power),
         1
     )
 
+    home_goal_avg = home_attack / 40
+    away_goal_avg = away_attack / 42
+
+    predicted_home_goals = max(
+        range(6),
+        key=lambda x:
+            poisson(home_goal_avg, x)
+    )
+
+    predicted_away_goals = max(
+        range(6),
+        key=lambda x:
+            poisson(away_goal_avg, x)
+    )
+
+    score_prediction = (
+        f"{predicted_home_goals}"
+        f"-"
+        f"{predicted_away_goals}"
+    )
+
     return {
-
-        "winner": winner,
-
-        "confidence": confidence,
 
         "home_attack": home_attack,
         "away_attack": away_attack,
@@ -141,27 +238,115 @@ def analyze_match(home, away):
         "home_def": home_def,
         "away_def": away_def,
 
-        "home_form": home_form,
-        "away_form": away_form,
+        "home_rank": home_rank,
+        "away_rank": away_rank,
 
-        "home_h2h": home_h2h,
-        "away_h2h": away_h2h,
+        "winner": winner,
 
-        "home_power": round(home_power, 1),
-        "away_power": round(away_power, 1),
-
-        "home_win": simulations["home_win"],
-        "away_win": simulations["away_win"],
-        "draw": simulations["draw"],
+        "confidence": confidence,
 
         "score_prediction":
-            f"{predicted_home_goals}-{predicted_away_goals}"
+            score_prediction,
+
+        "home_win":
+            simulations["home_win"],
+
+        "draw":
+            simulations["draw"],
+
+        "away_win":
+            simulations["away_win"],
+
+        "home_form":
+            recent_form(home),
+
+        "away_form":
+            recent_form(away)
 
     }
 
-# ==========================================
-# HOME PAGE
-# ==========================================
+# ============================================
+# CACHE
+# ============================================
+
+def get_prediction(match_id, home, away):
+
+    cursor.execute(
+
+        "SELECT * FROM predictions WHERE match_id=?",
+
+        (match_id,)
+
+    )
+
+    row = cursor.fetchone()
+
+    now = int(time.time())
+
+    if row:
+
+        created_at = row[9]
+
+        if now - created_at < CACHE_TIME:
+
+            return {
+
+                "winner": row[3],
+
+                "confidence": row[4],
+
+                "score_prediction": row[5],
+
+                "home_win": row[6],
+
+                "draw": row[7],
+
+                "away_win": row[8]
+
+            }
+
+    prediction = generate_prediction(
+        match_id,
+        home,
+        away
+    )
+
+    cursor.execute("""
+
+    INSERT OR REPLACE INTO predictions
+
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+
+    """, (
+
+        match_id,
+
+        home,
+        away,
+
+        prediction["winner"],
+
+        prediction["confidence"],
+
+        prediction["score_prediction"],
+
+        prediction["home_win"],
+
+        prediction["draw"],
+
+        prediction["away_win"],
+
+        now
+
+    ))
+
+    conn.commit()
+
+    return prediction
+
+# ============================================
+# HOME
+# ============================================
 
 @app.route("/")
 def home():
@@ -174,35 +359,66 @@ def home():
 
     matches = []
 
-    links = soup.find_all("a")
-
     added = set()
 
-    for link in links:
+    for a in soup.find_all("a"):
 
-        href = link.get("href")
-        text = link.text.strip()
+        href = a.get("href")
+        text = a.text.strip()
 
         if not href:
             continue
 
-        if "truc-tiep-ket-qua" in href:
+        if "truc-tiep-ket-qua" not in href:
+            continue
 
-            full_url = BASE_URL + href
+        full_url = BASE_URL + href
 
-            if full_url in added:
-                continue
+        if full_url in added:
+            continue
 
-            added.add(full_url)
+        added.add(full_url)
 
-            matches.append({
+        slug = href.split("/")[-1]
 
-                "name": text if text else "Football Match",
-                "url": full_url
+        slug = slug.replace(".html", "")
 
-            })
+        teams = slug.split("-vs-")
 
-    html_page = """
+        if len(teams) < 2:
+            continue
+
+        home_team = teams[0].replace("-", " ").title()
+
+        away_team = (
+            teams[1]
+            .split("-")[0]
+            .replace("-", " ")
+            .title()
+        )
+
+        prediction = get_prediction(
+            slug,
+            home_team,
+            away_team
+        )
+
+        matches.append({
+
+            "home": home_team,
+            "away": away_team,
+
+            "url": full_url,
+
+            "prediction": prediction,
+
+            "time": "19:30",
+
+            "league": "Football League"
+
+        })
+
+    page = """
 
 <!DOCTYPE html>
 <html lang="vi">
@@ -211,7 +427,7 @@ def home():
 
 <meta charset="UTF-8">
 
-<title>AI FIFA FOOTBALL ANALYZER</title>
+<title>AI FOOTBALL ANALYZER</title>
 
 <style>
 
@@ -227,14 +443,14 @@ body{
 .header{
 
     text-align:center;
-    padding:30px;
+
+    padding:25px;
 
     font-size:40px;
-    font-weight:bold;
 
     color:#00ffd5;
 
-    text-shadow:0 0 20px #00ffd5;
+    font-weight:bold;
 
 }
 
@@ -249,7 +465,7 @@ body{
 
     background:#111827;
 
-    margin:20px 0;
+    margin:25px 0;
 
     padding:25px;
 
@@ -257,36 +473,114 @@ body{
 
     border:1px solid #00ffd5;
 
-    box-shadow:0 0 20px rgba(0,255,213,0.2);
+}
+
+.match{
+
+    font-size:30px;
+
+    font-weight:bold;
 
 }
 
-.card h2{
+.league{
 
-    margin:0 0 15px 0;
+    color:#00ffd5;
+
+}
+
+.confidence-bar{
+
+    width:100%;
+
+    background:#1f2937;
+
+    border-radius:20px;
+
+    overflow:hidden;
+
+    margin-top:15px;
+
+}
+
+.fill{
+
+    height:24px;
+
+    background:#00ffd5;
+
+    text-align:center;
+
+    color:black;
+
+    font-weight:bold;
+
+    line-height:24px;
+
+}
+
+.form{
+
+    margin-top:10px;
+
+}
+
+.form span{
+
+    display:inline-block;
+
+    width:35px;
+    height:35px;
+
+    text-align:center;
+
+    line-height:35px;
+
+    border-radius:50%;
+
+    margin-right:5px;
+
+    font-weight:bold;
+
+}
+
+.W{
+
+    background:#00ff95;
+    color:black;
+
+}
+
+.D{
+
+    background:#ffcc00;
+    color:black;
+
+}
+
+.L{
+
+    background:#ff4d4d;
 
 }
 
 .btn{
 
+    display:inline-block;
+
+    margin-top:20px;
+
     background:#00ffd5;
+
     color:black;
-
-    padding:12px 25px;
-
-    border-radius:12px;
 
     text-decoration:none;
 
+    padding:12px 20px;
+
+    border-radius:12px;
+
     font-weight:bold;
-
-    display:inline-block;
-
-}
-
-.btn:hover{
-
-    transform:scale(1.05);
 
 }
 
@@ -298,7 +592,7 @@ body{
 
 <div class="header">
 
-⚽ AI FIFA FOOTBALL ANALYZER
+⚽ AI FOOTBALL ANALYZER PRO
 
 </div>
 
@@ -308,13 +602,87 @@ body{
 
 <div class="card">
 
-<h2>{{match.name}}</h2>
+<div class="league">
 
-<a class="btn"
+🏆 {{match.league}}
 
-href="/analyze?url={{match.url}}">
+</div>
 
-XEM AI PHÂN TÍCH
+<h2 class="match">
+
+{{match.home}}
+VS
+{{match.away}}
+
+</h2>
+
+<p>
+🕒 {{match.time}}
+</p>
+
+<h3>
+
+🤖 AI:
+{{match.prediction.winner}}
+
+</h3>
+
+<p>
+
+{{match.prediction.home_win}}%
+-
+DRAW {{match.prediction.draw}}%
+-
+{{match.prediction.away_win}}%
+
+</p>
+
+<div class="confidence-bar">
+
+<div class="fill"
+
+style="
+width:{{match.prediction.confidence}}%
+">
+
+{{match.prediction.confidence}}%
+
+</div>
+
+</div>
+
+<h4>🔥 FORM</h4>
+
+<div class="form">
+
+{% for r in match.prediction.home_form %}
+
+<span class="{{r}}">
+{{r}}
+</span>
+
+{% endfor %}
+
+</div>
+
+<div class="form">
+
+{% for r in match.prediction.away_form %}
+
+<span class="{{r}}">
+{{r}}
+</span>
+
+{% endfor %}
+
+</div>
+
+<a
+class="btn"
+href="/analyze?url={{match.url}}"
+>
+
+XEM PHÂN TÍCH
 
 </a>
 
@@ -330,345 +698,146 @@ XEM AI PHÂN TÍCH
 """
 
     return render_template_string(
-        html_page,
-        matches=matches[:30]
+        page,
+        matches=matches[:20]
     )
 
-# ==========================================
-# ANALYZE PAGE
-# ==========================================
+# ============================================
+# ANALYZE
+# ============================================
 
 @app.route("/analyze")
 def analyze():
 
-    match_url = request.args.get("url")
+    url = request.args.get("url")
 
-    # ==================================
-    # TỰ PARSE TEAM TỪ URL
-    # ==================================
-
-    slug = match_url.split("/")[-1]
+    slug = url.split("/")[-1]
 
     slug = slug.replace(".html", "")
 
     teams = slug.split("-vs-")
 
-    if len(teams) >= 2:
+    home_team = (
+        teams[0]
+        .replace("-", " ")
+        .title()
+    )
 
-        home_team = teams[0].replace("-", " ").title()
-        away_team = teams[1].split("-")[0].replace("-", " ").title()
+    away_team = (
+        teams[1]
+        .split("-")[0]
+        .replace("-", " ")
+        .title()
+    )
 
-    else:
-
-        home_team = "Home Team"
-        away_team = "Away Team"
-
-    analysis = analyze_match(
+    prediction = get_prediction(
+        slug,
         home_team,
         away_team
     )
 
-    page = """
+    return f"""
 
-<!DOCTYPE html>
-<html lang="vi">
+    <html>
 
-<head>
+    <head>
 
-<meta charset="UTF-8">
+    <title>AI Analysis</title>
 
-<title>AI Match Analysis</title>
+    <style>
 
-<style>
+    body{{
 
-body{
+        background:#050816;
+        color:white;
+        font-family:Arial;
+        padding:30px;
 
-    margin:0;
-    background:#050816;
-    color:white;
-    font-family:Arial;
+    }}
 
-}
+    .card{{
 
-.container{
+        background:#111827;
+        padding:30px;
+        border-radius:20px;
 
-    width:90%;
-    margin:auto;
+    }}
 
-    padding:30px;
+    </style>
 
-}
+    </head>
 
-.card{
+    <body>
 
-    background:#111827;
+    <div class='card'>
 
-    padding:30px;
+    <h1>
 
-    border-radius:20px;
+    {home_team}
+    VS
+    {away_team}
 
-    border:1px solid #00ffd5;
+    </h1>
 
-    box-shadow:0 0 25px rgba(0,255,213,0.2);
+    <h2>
 
-}
+    🏆 AI Prediction:
+    {prediction["winner"]}
 
-.title{
+    </h2>
 
-    text-align:center;
+    <h2>
 
-    font-size:45px;
+    ⚽ Score:
+    {prediction["score_prediction"]}
 
-    color:#00ffd5;
+    </h2>
 
-}
+    <h3>
 
-.winner{
+    🤖 Confidence:
+    {prediction["confidence"]}%
 
-    font-size:35px;
+    </h3>
 
-    color:#00ff95;
+    <p>
 
-}
+    {home_team} Win:
+    {prediction["home_win"]}%
 
-.bar{
+    </p>
 
-    width:100%;
-    background:#1f2937;
+    <p>
 
-    border-radius:20px;
+    Draw:
+    {prediction["draw"]}%
 
-    overflow:hidden;
+    </p>
 
-    margin-bottom:15px;
+    <p>
 
-}
+    {away_team} Win:
+    {prediction["away_win"]}%
 
-.fill{
+    </p>
 
-    height:22px;
+    </div>
 
-    background:#00ffd5;
+    </body>
 
-}
+    </html>
 
-.stat{
+    """
 
-    margin-top:25px;
-
-}
-
-.probability{
-
-    font-size:22px;
-
-}
-
-.score{
-
-    font-size:40px;
-
-    color:#ffcc00;
-
-}
-
-</style>
-
-</head>
-
-<body>
-
-<div class="container">
-
-<div class="card">
-
-<h1 class="title">
-
-{{home}} VS {{away}}
-
-</h1>
-
-<h2 class="winner">
-
-🏆 AI DỰ ĐOÁN:
-{{analysis.winner}}
-
-</h2>
-
-<h2 class="score">
-
-⚽ {{analysis.score_prediction}}
-
-</h2>
-
-<h3>
-
-🤖 AI CONFIDENCE:
-{{analysis.confidence}}%
-
-</h3>
-
-<hr>
-
-<div class="probability">
-
-<p>
-{{home}} WIN:
-{{analysis.home_win}}%
-</p>
-
-<p>
-DRAW:
-{{analysis.draw}}%
-</p>
-
-<p>
-{{away}} WIN:
-{{analysis.away_win}}%
-</p>
-
-</div>
-
-<div class="stat">
-
-<h2>ATTACK</h2>
-
-<p>{{home}}: {{analysis.home_attack}}</p>
-
-<div class="bar">
-<div class="fill"
-style="width:{{analysis.home_attack}}%">
-</div>
-</div>
-
-<p>{{away}}: {{analysis.away_attack}}</p>
-
-<div class="bar">
-<div class="fill"
-style="width:{{analysis.away_attack}}%">
-</div>
-</div>
-
-</div>
-
-<div class="stat">
-
-<h2>MIDFIELD</h2>
-
-<p>{{home}}: {{analysis.home_mid}}</p>
-
-<div class="bar">
-<div class="fill"
-style="width:{{analysis.home_mid}}%">
-</div>
-</div>
-
-<p>{{away}}: {{analysis.away_mid}}</p>
-
-<div class="bar">
-<div class="fill"
-style="width:{{analysis.away_mid}}%">
-</div>
-</div>
-
-</div>
-
-<div class="stat">
-
-<h2>DEFENSE</h2>
-
-<p>{{home}}: {{analysis.home_def}}</p>
-
-<div class="bar">
-<div class="fill"
-style="width:{{analysis.home_def}}%">
-</div>
-</div>
-
-<p>{{away}}: {{analysis.away_def}}</p>
-
-<div class="bar">
-<div class="fill"
-style="width:{{analysis.away_def}}%">
-</div>
-</div>
-
-</div>
-
-<div class="stat">
-
-<h2>FORM</h2>
-
-<p>{{home}}: {{analysis.home_form}}</p>
-
-<div class="bar">
-<div class="fill"
-style="width:{{analysis.home_form}}%">
-</div>
-</div>
-
-<p>{{away}}: {{analysis.away_form}}</p>
-
-<div class="bar">
-<div class="fill"
-style="width:{{analysis.away_form}}%">
-</div>
-</div>
-
-</div>
-
-<div class="stat">
-
-<h2>HEAD TO HEAD</h2>
-
-<p>{{home}}: {{analysis.home_h2h}}</p>
-
-<div class="bar">
-<div class="fill"
-style="width:{{analysis.home_h2h}}%">
-</div>
-</div>
-
-<p>{{away}}: {{analysis.away_h2h}}</p>
-
-<div class="bar">
-<div class="fill"
-style="width:{{analysis.away_h2h}}%">
-</div>
-</div>
-
-</div>
-
-</div>
-
-</div>
-
-</body>
-
-</html>
-
-"""
-
-    return render_template_string(
-
-        page,
-
-        home=home_team,
-        away=away_team,
-
-        analysis=analysis
-
-    )
-
-# ==========================================
+# ============================================
 # RUN
-# ==========================================
-
-import os
+# ============================================
 
 if __name__ == "__main__":
 
-    port = int(os.environ.get("PORT", 10000))
+    port = int(
+        os.environ.get("PORT", 10000)
+    )
 
     app.run(
         host="0.0.0.0",
