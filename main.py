@@ -1,289 +1,174 @@
-from flask import Flask, send_file, jsonify
+from flask import Flask, render_template, jsonify
 import requests
-import os
-import threading
-import time
+from bs4 import BeautifulSoup
+import random
+import math
 
 app = Flask(__name__)
 
-API_URL = "https://apisunhpt.onrender.com/sunlon"
+BASE_URL = "https://bongda24h.vn"
 
-DATA_FOLDER = "data"
-MAX_LINES = 300
-MAX_NUMBERS_PER_LINE = 30
-MAX_FILES = 5
+# =========================
+# AI ENGINE
+# =========================
 
-running = False
-full_flag = False
-last_phien = None
-last_tong = None
+def poisson(avg, goals):
 
-# ================= INIT =================
-def init_files():
-    if not os.path.exists(DATA_FOLDER):
-        os.makedirs(DATA_FOLDER)
+    return (avg ** goals) * math.exp(-avg) / math.factorial(goals)
 
-    for i in range(1, MAX_FILES + 1):
-        file_path = f"{DATA_FOLDER}/data_{i}.txt"
-        if not os.path.exists(file_path):
-            open(file_path, "w").close()
+def analyze_match(home, away):
 
-init_files()
+    # Demo stats AI
+    # Sau này có thể thay bằng dữ liệu thật
 
-# ================= FILE =================
-def get_current_file():
-    for i in range(1, MAX_FILES + 1):
-        path = f"{DATA_FOLDER}/data_{i}.txt"
-        with open(path, "r") as f:
-            if len(f.readlines()) < MAX_LINES:
-                return path
-    return None
+    home_form = random.randint(60, 95)
+    away_form = random.randint(50, 90)
 
-def save_number(number):
-    global full_flag
+    home_attack = random.randint(60, 95)
+    away_attack = random.randint(50, 90)
 
-    file_path = get_current_file()
-    if file_path is None:
-        full_flag = True
-        return "FULL"
+    home_defense = random.randint(55, 90)
+    away_defense = random.randint(50, 85)
 
-    with open(file_path, "r") as f:
-        lines = f.readlines()
+    home_rank = random.randint(1, 10)
+    away_rank = random.randint(1, 10)
 
-    if not lines:
-        lines = [""]
+    home_score = (
+        home_form * 0.35 +
+        home_attack * 0.25 +
+        home_defense * 0.20 +
+        (100 - home_rank) * 0.20
+    )
 
-    last_line = lines[-1].strip()
+    away_score = (
+        away_form * 0.35 +
+        away_attack * 0.25 +
+        away_defense * 0.20 +
+        (100 - away_rank) * 0.20
+    )
 
-    # 🔥 chống trùng số cuối
-    if last_line:
-        clean = last_line.replace("[", "").replace("]", "").replace(",", " ").split()
-        if clean and clean[-1] == str(number):
-            print("⚠️ TRÙNG - BỎ QUA")
-            return "SKIP"
-
-    if last_line.endswith("],"):
-        last_line = last_line[:-2]
-    elif last_line.endswith("]"):
-        last_line = last_line[:-1]
-
-    numbers = last_line.replace("[", "").split(",")
-    numbers = [n for n in numbers if n != ""]
-
-    if len(numbers) < MAX_NUMBERS_PER_LINE:
-        numbers.append(str(number))
-        lines[-1] = "[" + ",".join(numbers) + "],\n"
+    if home_score > away_score:
+        winner = home
     else:
-        lines.append(f"[{number}],\n")
+        winner = away
 
-    with open(file_path, "w") as f:
-        f.writelines(lines)
+    confidence = round(
+        abs(home_score - away_score),
+        1
+    )
 
-    return "OK"
+    home_goal_avg = round(home_attack / 40, 2)
+    away_goal_avg = round(away_attack / 45, 2)
 
-# ================= AUTO FETCH =================
-def auto_fetch():
-    global running, last_phien, last_tong
+    predicted_home_goals = max(
+        range(5),
+        key=lambda x: poisson(home_goal_avg, x)
+    )
 
-    print("🚀 AUTO FETCH START")
+    predicted_away_goals = max(
+        range(5),
+        key=lambda x: poisson(away_goal_avg, x)
+    )
 
-    while running:
-        if full_flag:
-            print("⚠️ FULL DATA - STOP")
-            break
+    return {
 
-        try:
-            res = requests.get(API_URL, timeout=10).json()
+        "winner": winner,
 
-            phien = int(res.get("phien", 0))
-            tong = res.get("tong")
+        "confidence": confidence,
 
-            if phien == 0 or tong is None:
-                print("❌ API ERROR DATA")
-                time.sleep(5)
+        "home_score": round(home_score, 1),
+        "away_score": round(away_score, 1),
+
+        "home_form": home_form,
+        "away_form": away_form,
+
+        "home_attack": home_attack,
+        "away_attack": away_attack,
+
+        "home_defense": home_defense,
+        "away_defense": away_defense,
+
+        "score_prediction":
+            f"{predicted_home_goals}-{predicted_away_goals}"
+
+    }
+
+# =========================
+# HOME
+# =========================
+
+@app.route("/")
+def home():
+
+    url = f"{BASE_URL}/bong-da/lich-thi-dau-amp.html"
+
+    html = requests.get(url).text
+
+    soup = BeautifulSoup(html, "lxml")
+
+    matches = []
+
+    links = soup.find_all("a")
+
+    added = set()
+
+    for link in links:
+
+        href = link.get("href")
+        text = link.text.strip()
+
+        if not href:
+            continue
+
+        if "truc-tiep-ket-qua" in href:
+
+            full_url = BASE_URL + href
+
+            if full_url in added:
                 continue
 
-            if last_phien is None:
-                last_phien = phien
-                last_tong = tong
-                print(f"🟡 INIT: {phien} | {tong}")
+            added.add(full_url)
 
-            elif phien > last_phien:
-                print(f"✅ NEW: {phien} | {tong}")
-                save_number(tong)
-                last_phien = phien
-                last_tong = tong
+            matches.append({
 
-            elif phien == last_phien and tong != last_tong:
-                print(f"♻️ UPDATE: {phien} | {tong}")
-                save_number(tong)
-                last_tong = tong
+                "name": text if text else "Football Match",
+                "url": full_url
 
-            else:
-                print(f"⏳ WAIT: {phien}")
+            })
 
-        except Exception as e:
-            print("❌ API ERROR:", e)
+    return render_template(
+        "index.html",
+        matches=matches[:30]
+    )
 
-        # 🔥 check mỗi 30s
-        time.sleep(30)
+# =========================
+# MATCH ANALYSIS
+# =========================
 
-# ================= WEB =================
-@app.route("/")
-def index():
-    files = os.listdir(DATA_FOLDER)
+@app.route("/match")
+def match():
 
-    html = f"""
-    <html>
-    <head>
-    <title>LOGGER PRO MAX</title>
-    <style>
-    body {{
-        background:#0f172a;
-        color:white;
-        font-family:Arial;
-        text-align:center;
-    }}
-    .box {{
-        background:#1e293b;
-        margin:10px auto;
-        padding:15px;
-        border-radius:12px;
-        width:90%;
-        max-width:600px;
-    }}
-    button {{
-        padding:10px;
-        margin:5px;
-        border:none;
-        border-radius:8px;
-        cursor:pointer;
-        font-weight:bold;
-    }}
-    .start{{background:#22c55e}}
-    .stop{{background:#ef4444}}
-    .reset{{background:#f59e0b}}
-    .view{{background:#3b82f6}}
-    .download{{background:#8b5cf6}}
-    textarea {{
-        width:100%;
-        height:150px;
-        background:#020617;
-        color:#22c55e;
-        border-radius:8px;
-        padding:10px;
-    }}
-    </style>
-    </head>
+    # Demo đọc URL
+    # Sau này parse thật từ URL
 
-    <body>
-    <h2>🚀 LOGGER PRO MAX (30s - AUTO)</h2>
+    home_team = "Home Team"
+    away_team = "Away Team"
 
-    <div class="box">
-        <button class="start" onclick="start()">▶ Start</button>
-        <button class="stop" onclick="stop()">⛔ Stop</button>
-        <button class="reset" onclick="reset()">🔄 Reset</button>
-        <h3 id="status">Loading...</h3>
-    </div>
-    """
+    analysis = analyze_match(
+        home_team,
+        away_team
+    )
 
-    for f in files:
-        html += f"""
-        <div class="box">
-            <h3>{f}</h3>
-            <button class="view" onclick="viewFile('{f}')">👁 Xem</button>
-            <a href="/download/{f}">
-                <button class="download">📥 Download</button>
-            </a>
-            <textarea id="content_{f}"></textarea>
-        </div>
-        """
+    return render_template(
 
-    html += """
-    <script>
-    function start(){ fetch('/start') }
-    function stop(){ fetch('/stop') }
+        "match.html",
 
-    function reset(){
-        if(confirm("Reset toàn bộ dữ liệu?")){
-            fetch('/reset').then(()=>location.reload())
-        }
-    }
+        home=home_team,
+        away=away_team,
 
-    function viewFile(name){
-        fetch('/view/'+name)
-        .then(res=>res.text())
-        .then(data=>{
-            document.getElementById("content_"+name).value=data
-        })
-    }
+        analysis=analysis
 
-    setInterval(()=>{
-        fetch('/status')
-        .then(r=>r.json())
-        .then(d=>{
-            document.getElementById("status").innerHTML=d.msg
-        })
-    },2000)
-    </script>
+    )
 
-    </body>
-    </html>
-    """
-
-    return html
-
-@app.route("/view/<filename>")
-def view_file(filename):
-    with open(f"{DATA_FOLDER}/{filename}", "r") as f:
-        return f.read()
-
-@app.route("/start")
-def start():
-    global running, full_flag
-
-    if full_flag:
-        return jsonify({"msg":"⚠️ FULL - RESET"})
-
-    if not running:
-        running = True
-        threading.Thread(target=auto_fetch, daemon=True).start()
-
-    return jsonify({"msg":"▶ RUNNING"})
-
-@app.route("/stop")
-def stop():
-    global running
-    running = False
-    return jsonify({"msg":"⛔ STOPPED"})
-
-@app.route("/reset")
-def reset():
-    global running, full_flag, last_phien, last_tong
-
-    running = False
-    full_flag = False
-    last_phien = None
-    last_tong = None
-
-    for i in range(1, MAX_FILES + 1):
-        open(f"{DATA_FOLDER}/data_{i}.txt", "w").close()
-
-    return jsonify({"msg":"🔄 RESET DONE"})
-
-@app.route("/status")
-def status():
-    if full_flag:
-        return jsonify({"msg": f"⚠️ FULL | Last: {last_phien}"})
-    elif running:
-        return jsonify({"msg": f"▶ RUNNING | Phiên: {last_phien}"})
-    else:
-        return jsonify({"msg": f"⛔ STOPPED | Phiên: {last_phien}"})
-
-@app.route("/download/<filename>")
-def download(filename):
-    return send_file(f"{DATA_FOLDER}/{filename}", as_attachment=True)
-
-# ================= RUN =================
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    app.run(debug=True)
