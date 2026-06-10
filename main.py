@@ -285,10 +285,39 @@ def _to_float(v):
         return np.nan
 
 
+SYMBOL_MAP = {
+    "BTCUSD": "BTC-USD",
+    "ETHUSD": "ETH-USD",
+    "BNBUSD": "BNB-USD",
+
+    "XAUUSD": "GC=F",
+    "XAGUSD": "SI=F",
+
+    "EURUSD": "EURUSD=X",
+    "GBPUSD": "GBPUSD=X",
+    "USDJPY": "JPY=X",
+    "AUDUSD": "AUDUSD=X",
+    "USDCAD": "CAD=X",
+    "USDCHF": "CHF=X",
+    "NZDUSD": "NZDUSD=X",
+}
+
 def normalize_symbol(symbol: str, market: str) -> str:
     symbol = symbol.strip().upper()
-    if not symbol:
-        return symbol
+
+    if symbol in SYMBOL_MAP:
+        return SYMBOL_MAP[symbol]
+
+    if market == "HK" and "." not in symbol:
+        return f"{symbol}.HK"
+
+    if market == "JP" and "." not in symbol:
+        return f"{symbol}.T"
+
+    if market == "UK" and "." not in symbol:
+        return f"{symbol}.L"
+
+    return symbol
 
     market = market.upper().strip()
     if market == 'HK' and '.' not in symbol:
@@ -332,9 +361,14 @@ def add_indicators(df: pd.DataFrame, fast: int = 20, slow: int = 100) -> pd.Data
     df['High'] = pd.to_numeric(df['High'], errors='coerce')
     df['Low'] = pd.to_numeric(df['Low'], errors='coerce')
     df['Volume'] = pd.to_numeric(df['Volume'], errors='coerce')
-
+  
     df[f'SMA_{fast}'] = df['Close'].rolling(fast).mean()
     df[f'SMA_{slow}'] = df['Close'].rolling(slow).mean()
+   df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
+df["EMA50"] = df["Close"].ewm(span=50, adjust=False).mean()
+df["EMA200"] = df["Close"].ewm(span=200, adjust=False).mean()
+
+
 
     delta = df['Close'].diff()
     gain = delta.clip(lower=0)
@@ -355,6 +389,34 @@ def add_indicators(df: pd.DataFrame, fast: int = 20, slow: int = 100) -> pd.Data
     df['BB_MID'] = mid
     df['BB_UPPER'] = mid + 2 * std
     df['BB_LOWER'] = mid - 2 * std
+df["VOL_MA20"] = (
+    df["Volume"]
+    .rolling(20)
+    .mean()
+)
+
+df["VOL_SPIKE"] = (
+    df["Volume"]
+    >
+    df["VOL_MA20"] * 1.5
+)
+
+high_low = df["High"] - df["Low"]
+
+high_close = (
+    df["High"] - df["Close"].shift()
+).abs()
+
+low_close = (
+    df["Low"] - df["Close"].shift()
+).abs()
+
+tr = pd.concat(
+    [high_low, high_close, low_close],
+    axis=1
+).max(axis=1)
+
+df["ATR14"] = tr.rolling(14).mean()
 
     return df
 
@@ -447,6 +509,29 @@ def signal_engine(latest: pd.Series, prev: pd.Series, fast_col: str, slow_col: s
     signal = 'HOLD'
     reason = 'Chưa có đủ tín hiệu đồng thuận.'
     confidence = 0.0
+  score = 0
+
+ema20 = _to_float(latest["EMA20"])
+ema50 = _to_float(latest["EMA50"])
+ema200 = _to_float(latest["EMA200"])
+
+if ema20 > ema50:
+    score += 20
+
+if ema50 > ema200:
+    score += 20
+
+if macd > macd_signal:
+    score += 20
+
+if rsi > 50:
+    score += 10
+
+if close > ema20:
+    score += 20
+
+if latest["VOL_SPIKE"]:
+    score += 10
 
     bullish = np.isfinite(sma_fast) and np.isfinite(sma_slow) and np.isfinite(rsi) and sma_fast > sma_slow and rsi < 68 and macd > macd_signal
     bearish = np.isfinite(sma_fast) and np.isfinite(sma_slow) and np.isfinite(rsi) and sma_fast < sma_slow and rsi > 32 and macd < macd_signal
@@ -491,8 +576,47 @@ def signal_engine(latest: pd.Series, prev: pd.Series, fast_col: str, slow_col: s
             reason = 'Xu hướng giảm nhưng cần thêm xác nhận.'
             confidence = 0.45
 
+  if score >= 90:
+    signal = "STRONG BUY"
+
+elif score >= 75:
+    signal = "BUY"
+
+elif score >= 60:
+    signal = "WEAK BUY"
+
+elif score <= 10:
+    signal = "STRONG SELL"
+
+elif score <= 25:
+    signal = "SELL"
+
+elif score <= 40:
+    signal = "WEAK SELL"
+
+else:
+    signal = "HOLD"
+
     if np.isfinite(close):
-        atr_like = max(close * 0.03, 0.01)
+        atr = _to_float(latest["ATR14"])
+
+if np.isfinite(atr):
+
+    if "BUY" in signal:
+        stop_loss = close - atr * 1.5
+        take_profit = close + atr * 3
+
+    elif "SELL" in signal:
+        stop_loss = close + atr * 1.5
+        take_profit = close - atr * 3
+
+    else:
+        stop_loss = close - atr
+        take_profit = close + atr
+
+else:
+    stop_loss = np.nan
+    take_profit = np.nan
         stop_loss = close - atr_like * 1.5 if signal == 'BUY' else close + atr_like * 1.5 if signal == 'SELL' else close - atr_like
         take_profit = close + atr_like * 2.5 if signal == 'BUY' else close - atr_like * 2.5 if signal == 'SELL' else close + atr_like * 1.5
     else:
@@ -520,6 +644,18 @@ def analyze():
         fast = max(5, slow // 2)
 
     symbol = normalize_symbol(symbol, market)
+ticker = yf.Ticker(symbol)
+
+try:
+    info = ticker.info
+except:
+    info = {}
+fundamental={
+    "market_cap": info.get("marketCap"),
+    "pe": info.get("trailingPE"),
+    "eps": info.get("trailingEps"),
+    "beta": info.get("beta")
+}
 
     try:
         df = download_data(symbol, period, interval)
@@ -636,6 +772,39 @@ def analyze():
         )
     except Exception as e:
         return jsonify(ok=False, error=f'Lỗi phân tích: {e}')
+
+def detect_pattern(df):
+
+    if len(df) < 2:
+        return "Unknown"
+
+    prev = df.iloc[-2]
+    curr = df.iloc[-1]
+
+    prev_body = abs(prev["Close"] - prev["Open"])
+    curr_body = abs(curr["Close"] - curr["Open"])
+
+    if (
+        prev["Close"] < prev["Open"]
+        and curr["Close"] > curr["Open"]
+        and curr["Close"] > prev["Open"]
+        and curr["Open"] < prev["Close"]
+    ):
+        return "Bullish Engulfing"
+
+    if (
+        prev["Close"] > prev["Open"]
+        and curr["Close"] < curr["Open"]
+        and curr["Open"] > prev["Close"]
+        and curr["Close"] < prev["Open"]
+    ):
+        return "Bearish Engulfing"
+
+    return "Neutral"
+pattern = detect_pattern(df)
+
+
+
 
 
 @app.route('/health')
