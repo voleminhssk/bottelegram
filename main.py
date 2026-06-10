@@ -300,18 +300,28 @@ def normalize_symbol(symbol: str, market: str) -> str:
     return symbol
 
 
-def download_data(symbol: str, period: str, interval: str) -> pd.DataFrame:
-    df = yf.download(symbol, period=period, interval=interval, auto_adjust=False, progress=False)
+def download_data(symbol: str, period: str, interval: str):
+    df = yf.download(
+        symbol,
+        period=period,
+        interval=interval,
+        auto_adjust=False,
+        progress=False
+    )
+
     if df is None or df.empty:
         return pd.DataFrame()
+
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+
     df = df.reset_index()
-    rename_map = {c: c.title() for c in df.columns}
-    df = df.rename(columns=rename_map)
+
+    df.columns = [str(c).title() for c in df.columns]
+
     if 'Datetime' in df.columns and 'Date' not in df.columns:
-        df = df.rename(columns={'Datetime': 'Date'})
-    for col in ['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']:
-        if col not in df.columns:
-            df[col] = np.nan
+        df.rename(columns={'Datetime': 'Date'}, inplace=True)
+
     return df
 
 
