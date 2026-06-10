@@ -1,5 +1,6 @@
 flask
 requests
 beautifulsoup4
-lxml
-PIL
+numpy
+pandas
+yfinance
